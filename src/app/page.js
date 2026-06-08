@@ -35,31 +35,24 @@ export default function App() {
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'volleyball2025';
 
-  // Load saved session from localStorage on mount
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('vb_session');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        setSession(parsed);
-        setDraft(parsed);
-      }
-    } catch (e) {}
-  }, []);
-
-  // Load players from sheet on mount
   useEffect(() => {
     fetch('/api/signup')
       .then(r => r.json())
-      .then(d => setPlayers(d.players || []))
+      .then(d => {
+        setPlayers(d.players || []);
+        if (d.session) {
+          setSession(d.session);
+          setDraft(d.session);
+        }
+      })
       .catch(() => {});
   }, []);
 
-  // Poll signups every 15s when session is live
   const fetchSignups = useCallback(() => {
     if (!session?.date) return;
     fetch(`/api/session?date=${encodeURIComponent(session.date)}`)
@@ -79,13 +72,24 @@ export default function App() {
   const trainingLeft = (session?.maxTraining || 0) - trainingCount;
   const gamesLeft = (session?.maxGames || 0) - gamesCount;
 
-  const publish = () => {
+  const publish = async () => {
     if (!draft.date) { alert('Please set a date first!'); return; }
-    setSession({ ...draft });
-    try { localStorage.setItem('vb_session', JSON.stringify(draft)); } catch (e) {}
-    setSignups([]);
-    setSubmitted(false);
-    setView('signup');
+    setPublishing(true);
+    try {
+      await fetch('/api/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'publish_session', session: draft }),
+      });
+      setSession({ ...draft });
+      setSignups([]);
+      setSubmitted(false);
+      setView('signup');
+    } catch (e) {
+      alert('Failed to publish. Please try again.');
+    } finally {
+      setPublishing(false);
+    }
   };
 
   const handleSignup = async () => {
@@ -138,9 +142,7 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
         .nav { display:flex; background:#1e293b; border-bottom:1px solid #334155; overflow-x:auto; }
-        .nb { flex:1; min-width:72px; padding:12px 6px; text-align:center; border:none; background:none;
-          font-family:'DM Sans',sans-serif; font-size:12px; font-weight:600; color:#64748b;
-          cursor:pointer; border-bottom:3px solid transparent; margin-bottom:-1px; transition:all 0.2s; white-space:nowrap; }
+        .nb { flex:1; min-width:72px; padding:12px 6px; text-align:center; border:none; background:none; font-family:'DM Sans',sans-serif; font-size:12px; font-weight:600; color:#64748b; cursor:pointer; border-bottom:3px solid transparent; margin-bottom:-1px; transition:all 0.2s; white-space:nowrap; }
         .nb.on { color:#f8fafc; border-bottom-color:#f59e0b; }
         .badge { background:#f59e0b22; color:#f59e0b; font-size:11px; font-weight:700; border-radius:10px; padding:1px 6px; margin-left:4px; }
         input, select, textarea { font-family:'DM Sans',sans-serif; }
@@ -163,6 +165,7 @@ export default function App() {
         .tog-sub { font-size:10px; color:#475569; }
         .pub-btn { width:100%; margin-top:24px; background:#f59e0b; color:#0f172a; border:none; border-radius:12px; font-family:'Syne',sans-serif; font-size:16px; font-weight:800; padding:14px; cursor:pointer; letter-spacing:1px; transition:all 0.2s; }
         .pub-btn:hover { background:#fbbf24; }
+        .pub-btn:disabled { opacity:0.6; cursor:not-allowed; }
         .lock-wrap { max-width:340px; margin:60px auto; padding:0 20px; text-align:center; }
         .lock-title { font-family:'Syne',sans-serif; font-size:22px; font-weight:800; margin-bottom:20px; }
         .sw { max-width:480px; margin:0 auto; }
@@ -270,8 +273,7 @@ export default function App() {
               <input className="inp" value={draft.location} onChange={e => setDraft(p => ({ ...p, location: e.target.value }))} />
             </div>
             <div className="fl"><label>Google Maps Link</label>
-              <input className="inp" value={draft.mapUrl} onChange={e => setDraft(p => ({ ...p, mapUrl: e.target.value }))}
-                placeholder="https://maps.google.com/..." />
+              <input className="inp" value={draft.mapUrl} onChange={e => setDraft(p => ({ ...p, mapUrl: e.target.value }))} placeholder="https://maps.google.com/..." />
             </div>
             <div className="fl"><label>Hosts</label>
               <input className="inp" value={draft.hosts} onChange={e => setDraft(p => ({ ...p, hosts: e.target.value }))} />
@@ -313,8 +315,8 @@ export default function App() {
             <div className="fl">
               <textarea className="inp" rows={3} value={draft.notes} onChange={e => setDraft(p => ({ ...p, notes: e.target.value }))} style={{ resize: 'vertical' }} />
             </div>
-            <button className="pub-btn" onClick={publish}>
-              {session ? '🔄 UPDATE & REPUBLISH' : '🚀 PUBLISH SESSION'}
+            <button className="pub-btn" onClick={publish} disabled={publishing}>
+              {publishing ? 'Publishing…' : session ? '🔄 UPDATE & REPUBLISH' : '🚀 PUBLISH SESSION'}
             </button>
             <p style={{ textAlign: 'center', fontSize: 12, color: '#475569', marginTop: 10 }}>
               Share the Sign Up tab link in WhatsApp after publishing
@@ -348,7 +350,6 @@ export default function App() {
                   <span style={{ fontSize: 12, color: '#64748b' }}>{session.notes}</span></div>}
               </div>
             </div>
-
             <div className="spots">
               {session.offerTraining && (
                 <div className="spot">
@@ -365,13 +366,11 @@ export default function App() {
                 <div className="spot-l">Signed up</div>
               </div>
             </div>
-
             <div className="prow">
               {session.offerTraining && <div className="pc"><div className="pa">{session.prices.training} AED</div><div className="pt">Training</div></div>}
               <div className="pc"><div className="pa">{session.prices.games} AED</div><div className="pt">Games</div></div>
               {session.offerTraining && session.offerBoth && <div className="pc"><div className="pa">{session.prices.both} AED</div><div className="pt">Both</div></div>}
             </div>
-
             {submitted ? (
               <>
                 <div className="succ">
