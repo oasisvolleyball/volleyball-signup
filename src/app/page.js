@@ -20,7 +20,7 @@ const EMPTY_SESSION = {
 };
 
 export default function App() {
-  const [view, setView] = useState('admin');
+  const [view, setView] = useState('signup');
   const [draft, setDraft] = useState(EMPTY_SESSION);
   const [session, setSession] = useState(null);
   const [signups, setSignups] = useState([]);
@@ -32,7 +32,10 @@ export default function App() {
   const [adminPassword, setAdminPassword] = useState('');
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'volleyball2025';
-
+useEffect(() => {
+    const saved = localStorage.getItem('vb_session');
+    if (saved) setSession(JSON.parse(saved));
+  }, []);
   // Load players from sheet on mount
   useEffect(() => {
     fetch('/api/signup')
@@ -64,6 +67,7 @@ export default function App() {
   const publish = () => {
     if (!draft.date) { alert('Please set a date first!'); return; }
     setSession({ ...draft });
+    localStorage.setItem('vb_session', JSON.stringify(draft));
     setSignups([]);
     setSubmitted(false);
     setView('signup');
@@ -370,7 +374,7 @@ export default function App() {
                 </div>}
                 <div className="sc-row"><span className="sc-icon">⏰</span>{session.time}</div>
                 <div className="sc-row"><span className="sc-icon">📍</span>
-                  <a href={session.mapUrl} target="_blank" rel="noreferrer" style={{ color: '#f59e0b', textDecoration: 'none' }}>{session.location}</a>
+                  <a href={session.mapUrl.startsWith('http') ? session.mapUrl : 'https://' + session.mapUrl} target="_blank" rel="noreferrer" style={{ color: '#f59e0b', textDecoration: 'none' }}>{session.location}</a>
                 </div>
                 <div className="sc-row"><span className="sc-icon">👋</span>Hosts: {session.hosts}</div>
                 {session.notes && <div className="sc-row"><span className="sc-icon">ℹ️</span>
