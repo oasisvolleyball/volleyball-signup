@@ -131,9 +131,9 @@ export default function App() {
     : [];
 
   const typeOptions = [
-    { key: 'Training Only', sub: '7:00–7:30 PM · Beginner & novice', price: session?.prices?.training || 15, show: session?.offerTraining, full: trainingLeft <= 0 },
-    { key: 'Games Only', sub: '7:30–10:00 PM', price: session?.prices?.games || 30, show: true, full: gamesLeft <= 0 },
-    { key: 'Training + Games', sub: 'Full evening · 7:00–10:00 PM', price: session?.prices?.both || 40, show: session?.offerTraining && session?.offerBoth, full: trainingLeft <= 0 || gamesLeft <= 0 },
+    { key: 'Training Only', sub: '', price: session?.prices?.training || 15, show: session?.offerTraining, full: trainingLeft <= 0 },
+    { key: 'Games Only', sub: '', price: session?.prices?.games || 30, show: true, full: gamesLeft <= 0 },
+    { key: 'Training + Games', sub: '', price: session?.prices?.both || 40, show: session?.offerTraining && session?.offerBoth, full: trainingLeft <= 0 || gamesLeft <= 0 },
   ].filter(o => o.show);
 
   return (
@@ -265,9 +265,10 @@ export default function App() {
               <div className="fl"><label>Date</label>
                 <input className="inp" type="date" value={draft.date} onChange={e => setDraft(p => ({ ...p, date: e.target.value }))} />
               </div>
-              <div className="fl"><label>Time</label>
-                <input className="inp" value={draft.time} onChange={e => setDraft(p => ({ ...p, time: e.target.value }))} />
-              </div>
+              <div className="fl"><label>Session Times</label>
+  <input className="inp" value={draft.time} onChange={e => setDraft(p => ({ ...p, time: e.target.value }))}
+    placeholder="e.g. Training 7:00–7:30 PM · Games 7:30–10:00 PM" />
+</div>
             </div>
             <div className="fl"><label>Location Name</label>
               <input className="inp" value={draft.location} onChange={e => setDraft(p => ({ ...p, location: e.target.value }))} />
