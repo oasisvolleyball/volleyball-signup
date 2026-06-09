@@ -14,7 +14,6 @@ function getAuth() {
 }
 
 function formatDate(dateStr) {
-  // Convert 2026-06-12 to 12 Jun 2026
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
@@ -58,6 +57,7 @@ export async function POST(request) {
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
 
+    // Save session to Config sheet
     if (body.action === 'publish_session') {
       const { session } = body;
       await sheets.spreadsheets.values.update({
@@ -69,12 +69,33 @@ export async function POST(request) {
       return NextResponse.json({ success: true });
     }
 
+    // Remove a signup — find row by date+name and clear it
+    if (body.action === 'remove_signup') {
+      const { date, name } = body;
+      const formattedDate = formatDate(date);
+      const res = await sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Sessions!A:H',
+      });
+      const rows = res.data.values || [];
+      const rowIndex = rows.findIndex(r => r[1] === formattedDate && r[4] === name);
+      if (rowIndex >= 0) {
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `Sessions!A${rowIndex + 1}:H${rowIndex + 1}`,
+          valueInputOption: 'RAW',
+          requestBody: { values: [['', '', '', '', '', '', '', '']] },
+        });
+      }
+      return NextResponse.json({ success: true });
+    }
+
     // Player signup
     // Sheet columns: A=#, B=Date, C=Amount, D=Paid, E=Name, F=Type, G=Rating, H=Level
     const { date, name, type, amount, isNewPlayer } = body;
     const formattedDate = formatDate(date);
 
-    await sheets.spreadsheets.values.append({
+    const appendRes = await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Sessions!A:H',
       valueInputOption: 'USER_ENTERED',
@@ -94,8 +115,8 @@ export async function POST(request) {
       });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, appended: appendRes.data });
   } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message, stack: err.stack }, { status: 500 });
   }
 }
