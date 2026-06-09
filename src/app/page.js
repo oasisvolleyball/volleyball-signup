@@ -19,8 +19,14 @@ const EMPTY_SESSION = {
   prices: { training: 15, games: 30, both: 40 },
 };
 
+function safeMapUrl(url) {
+  if (!url) return '#';
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  return 'https://' + url;
+}
+
 export default function App() {
-  const [view, setView] = useState('admin');
+  const [view, setView] = useState('signup');
   const [draft, setDraft] = useState(EMPTY_SESSION);
   const [session, setSession] = useState(null);
   const [signups, setSignups] = useState([]);
@@ -29,19 +35,24 @@ export default function App() {
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'volleyball2025';
 
-  // Load players from sheet on mount
   useEffect(() => {
     fetch('/api/signup')
       .then(r => r.json())
-      .then(d => setPlayers(d.players || []))
+      .then(d => {
+        setPlayers(d.players || []);
+        if (d.session) {
+          setSession(d.session);
+          setDraft(d.session);
+        }
+      })
       .catch(() => {});
   }, []);
 
-  // Poll signups every 15s when session is live
   const fetchSignups = useCallback(() => {
     if (!session?.date) return;
     fetch(`/api/session?date=${encodeURIComponent(session.date)}`)
@@ -61,20 +72,32 @@ export default function App() {
   const trainingLeft = (session?.maxTraining || 0) - trainingCount;
   const gamesLeft = (session?.maxGames || 0) - gamesCount;
 
-  const publish = () => {
+  const publish = async () => {
     if (!draft.date) { alert('Please set a date first!'); return; }
-    setSession({ ...draft });
-    setSignups([]);
-    setSubmitted(false);
-    setView('signup');
+    setPublishing(true);
+    try {
+      await fetch('/api/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'publish_session', session: draft }),
+      });
+      setSession({ ...draft });
+      setSignups([]);
+      setSubmitted(false);
+      setView('signup');
+    } catch (e) {
+      alert('Failed to publish. Please try again.');
+    } finally {
+      setPublishing(false);
+    }
   };
 
   const handleSignup = async () => {
     const name = form.name.trim();
     if (!name) { setError('Please enter your name.'); return; }
-    if (!form.type) { setError('Please select what you\'re joining for.'); return; }
+    if (!form.type) { setError("Please select what you're joining for."); return; }
     if (signups.find(s => s.name.toLowerCase() === name.toLowerCase())) {
-      setError('You\'re already on the list!'); return;
+      setError("You're already on the list!"); return;
     }
     if ((form.type === 'Training Only' || form.type === 'Training + Games') && trainingLeft <= 0) {
       setError('Sorry, training is full!'); return;
@@ -82,24 +105,16 @@ export default function App() {
     if ((form.type === 'Games Only' || form.type === 'Training + Games') && gamesLeft <= 0) {
       setError('Sorry, games is full!'); return;
     }
-
     setLoading(true);
     const isNewPlayer = !players.find(p => p.name.toLowerCase() === name.toLowerCase());
     const amount = PRICES[form.type] || 0;
-
     try {
       const res = await fetch('/api/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date: session.date,
-          name,
-          type: form.type,
-          amount,
-          isNewPlayer,
-        }),
+        body: JSON.stringify({ date: session.date, name, type: form.type, amount, isNewPlayer }),
       });
-      if (!res.ok) throw new Error('Failed to sign up');
+      if (!res.ok) throw new Error('Failed');
       setSubmitted(true);
       setError('');
       fetchSignups();
@@ -110,17 +125,15 @@ export default function App() {
     }
   };
 
-  // Name suggestions from player directory
   const suggestions = form.name.trim().length > 1
     ? players.filter(p => p.name.toLowerCase().startsWith(form.name.trim().toLowerCase()) &&
-        !signups.find(s => s.name.toLowerCase() === p.name.toLowerCase()))
-      .slice(0, 4)
+        !signups.find(s => s.name.toLowerCase() === p.name.toLowerCase())).slice(0, 4)
     : [];
 
   const typeOptions = [
-    { key: 'Training Only', sub: '7:00–7:30 PM · Beginner & novice', price: session?.prices.training || 15, show: session?.offerTraining, full: trainingLeft <= 0 },
-    { key: 'Games Only', sub: '7:30–10:00 PM', price: session?.prices.games || 30, show: true, full: gamesLeft <= 0 },
-    { key: 'Training + Games', sub: 'Full evening · 7:00–10:00 PM', price: session?.prices.both || 40, show: session?.offerTraining && session?.offerBoth, full: trainingLeft <= 0 || gamesLeft <= 0 },
+    { key: 'Training Only', sub: '7:00–7:30 PM · Beginner & novice', price: session?.prices?.training || 15, show: session?.offerTraining, full: trainingLeft <= 0 },
+    { key: 'Games Only', sub: '7:30–10:00 PM', price: session?.prices?.games || 30, show: true, full: gamesLeft <= 0 },
+    { key: 'Training + Games', sub: 'Full evening · 7:00–10:00 PM', price: session?.prices?.both || 40, show: session?.offerTraining && session?.offerBoth, full: trainingLeft <= 0 || gamesLeft <= 0 },
   ].filter(o => o.show);
 
   return (
@@ -129,24 +142,16 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
         .nav { display:flex; background:#1e293b; border-bottom:1px solid #334155; overflow-x:auto; }
-        .nb { flex:1; min-width:72px; padding:12px 6px; text-align:center; border:none; background:none;
-          font-family:'DM Sans',sans-serif; font-size:12px; font-weight:600; color:#64748b;
-          cursor:pointer; border-bottom:3px solid transparent; margin-bottom:-1px; transition:all 0.2s; white-space:nowrap; }
+        .nb { flex:1; min-width:72px; padding:12px 6px; text-align:center; border:none; background:none; font-family:'DM Sans',sans-serif; font-size:12px; font-weight:600; color:#64748b; cursor:pointer; border-bottom:3px solid transparent; margin-bottom:-1px; transition:all 0.2s; white-space:nowrap; }
         .nb.on { color:#f8fafc; border-bottom-color:#f59e0b; }
-        .badge { background:#f59e0b22; color:#f59e0b; font-size:11px; font-weight:700;
-          border-radius:10px; padding:1px 6px; margin-left:4px; }
+        .badge { background:#f59e0b22; color:#f59e0b; font-size:11px; font-weight:700; border-radius:10px; padding:1px 6px; margin-left:4px; }
         input, select, textarea { font-family:'DM Sans',sans-serif; }
-
-        /* ADMIN */
         .aw { padding:20px 16px; max-width:540px; margin:0 auto; }
-        .st { font-family:'Syne',sans-serif; font-size:10px; font-weight:700; letter-spacing:3px;
-          text-transform:uppercase; color:#f59e0b; margin:20px 0 10px; }
+        .st { font-family:'Syne',sans-serif; font-size:10px; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:#f59e0b; margin:20px 0 10px; }
         .st:first-child { margin-top:0; }
         .fl { margin-bottom:12px; }
-        .fl label { display:block; font-size:11px; font-weight:600; color:#64748b;
-          text-transform:uppercase; letter-spacing:1px; margin-bottom:5px; }
-        .inp { width:100%; background:#1e293b; border:1.5px solid #334155; border-radius:10px;
-          color:#f1f5f9; font-size:14px; padding:10px 13px; outline:none; transition:border-color 0.2s; }
+        .fl label { display:block; font-size:11px; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:1px; margin-bottom:5px; }
+        .inp { width:100%; background:#1e293b; border:1.5px solid #334155; border-radius:10px; color:#f1f5f9; font-size:14px; padding:10px 13px; outline:none; transition:border-color 0.2s; }
         .inp:focus { border-color:#f59e0b; }
         .inp::placeholder { color:#475569; }
         .row2 { display:flex; gap:10px; }
@@ -154,24 +159,18 @@ export default function App() {
         .price-row { display:flex; gap:8px; }
         .price-row .fl { flex:1; }
         .tog-row { display:flex; gap:10px; margin-bottom:4px; }
-        .tog { flex:1; display:flex; align-items:center; gap:8px; cursor:pointer;
-          background:#1e293b; border-radius:10px; padding:10px 12px; border:1.5px solid #334155; transition:all 0.2s; }
+        .tog { flex:1; display:flex; align-items:center; gap:8px; cursor:pointer; background:#1e293b; border-radius:10px; padding:10px 12px; border:1.5px solid #334155; transition:all 0.2s; }
         .tog.on { border-color:#f59e0b; }
         .tog-txt { font-size:13px; font-weight:600; }
         .tog-sub { font-size:10px; color:#475569; }
-        .pub-btn { width:100%; margin-top:24px; background:#f59e0b; color:#0f172a; border:none;
-          border-radius:12px; font-family:'Syne',sans-serif; font-size:16px; font-weight:800;
-          padding:14px; cursor:pointer; letter-spacing:1px; transition:all 0.2s; }
+        .pub-btn { width:100%; margin-top:24px; background:#f59e0b; color:#0f172a; border:none; border-radius:12px; font-family:'Syne',sans-serif; font-size:16px; font-weight:800; padding:14px; cursor:pointer; letter-spacing:1px; transition:all 0.2s; }
         .pub-btn:hover { background:#fbbf24; }
+        .pub-btn:disabled { opacity:0.6; cursor:not-allowed; }
         .lock-wrap { max-width:340px; margin:60px auto; padding:0 20px; text-align:center; }
         .lock-title { font-family:'Syne',sans-serif; font-size:22px; font-weight:800; margin-bottom:20px; }
-
-        /* SIGNUP */
         .sw { max-width:480px; margin:0 auto; }
-        .sc { background:linear-gradient(135deg,#1e293b,#0f172a); padding:28px 20px 24px;
-          border-bottom:2px solid #f59e0b33; position:relative; overflow:hidden; }
-        .sc::before { content:'🏐'; position:absolute; right:16px; top:50%; transform:translateY(-50%);
-          font-size:72px; opacity:0.06; pointer-events:none; }
+        .sc { background:linear-gradient(135deg,#1e293b,#0f172a); padding:28px 20px 24px; border-bottom:2px solid #f59e0b33; position:relative; overflow:hidden; }
+        .sc::before { content:'🏐'; position:absolute; right:16px; top:50%; transform:translateY(-50%); font-size:72px; opacity:0.06; pointer-events:none; }
         .sc-tag { font-size:11px; letter-spacing:3px; text-transform:uppercase; color:#f59e0b; font-weight:700; margin-bottom:6px; }
         .sc-title { font-family:'Syne',sans-serif; font-size:clamp(20px,5vw,28px); font-weight:800; color:#fff; line-height:1.1; }
         .sc-meta { margin-top:12px; display:flex; flex-direction:column; gap:5px; }
@@ -188,75 +187,52 @@ export default function App() {
         .pa { font-family:'Syne',sans-serif; font-size:16px; font-weight:700; color:#f59e0b; }
         .pt { font-size:10px; color:#475569; text-transform:uppercase; letter-spacing:1px; margin-top:2px; }
         .fa { padding:20px 16px; }
-        .fl-lbl { font-size:11px; font-weight:600; color:#64748b; text-transform:uppercase;
-          letter-spacing:1px; margin-bottom:7px; display:block; }
+        .fl-lbl { font-size:11px; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:1px; margin-bottom:7px; display:block; }
         .name-wrap { position:relative; margin-bottom:18px; }
-        .suggs { position:absolute; top:calc(100% + 4px); left:0; right:0; background:#1e293b;
-          border:1.5px solid #334155; border-radius:10px; z-index:10; overflow:hidden;
-          box-shadow:0 4px 16px rgba(0,0,0,0.3); }
-        .sugg { padding:10px 14px; cursor:pointer; display:flex; justify-content:space-between;
-          align-items:center; transition:background 0.15s; font-size:13px; }
+        .suggs { position:absolute; top:calc(100% + 4px); left:0; right:0; background:#1e293b; border:1.5px solid #334155; border-radius:10px; z-index:10; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.3); }
+        .sugg { padding:10px 14px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:background 0.15s; font-size:13px; }
         .sugg:hover { background:#334155; }
         .type-btns { display:flex; flex-direction:column; gap:10px; margin-bottom:18px; }
-        .tbtn { background:#1e293b; border:2px solid #334155; border-radius:12px;
-          padding:14px 16px; cursor:pointer; text-align:left; transition:all 0.2s;
-          display:flex; justify-content:space-between; align-items:center; }
+        .tbtn { background:#1e293b; border:2px solid #334155; border-radius:12px; padding:14px 16px; cursor:pointer; text-align:left; transition:all 0.2s; display:flex; justify-content:space-between; align-items:center; }
         .tbtn:hover { border-color:#475569; }
         .tbtn.sel { border-color:#f59e0b; background:#f59e0b11; }
         .tbtn.dis { opacity:0.4; cursor:not-allowed; }
         .tbtn-name { font-size:14px; font-weight:600; color:#f1f5f9; }
         .tbtn-sub { font-size:11px; color:#64748b; margin-top:2px; }
         .tbtn-price { font-family:'Syne',sans-serif; font-size:16px; font-weight:800; color:#f59e0b; }
-        .sub-btn { width:100%; background:#f59e0b; color:#0f172a; border:none; border-radius:12px;
-          font-family:'Syne',sans-serif; font-size:16px; font-weight:800; padding:14px;
-          cursor:pointer; letter-spacing:1px; transition:all 0.2s; }
+        .sub-btn { width:100%; background:#f59e0b; color:#0f172a; border:none; border-radius:12px; font-family:'Syne',sans-serif; font-size:16px; font-weight:800; padding:14px; cursor:pointer; letter-spacing:1px; transition:all 0.2s; }
         .sub-btn:hover { background:#fbbf24; }
         .sub-btn:disabled { opacity:0.6; cursor:not-allowed; }
-        .err { background:#ef444422; border:1px solid #ef444444; color:#fca5a5;
-          border-radius:8px; padding:10px 14px; font-size:13px; margin-top:10px; }
-        .succ { margin:20px 16px; background:#1e293b; border:2px solid #34d39944;
-          border-radius:16px; padding:28px 20px; text-align:center; }
+        .err { background:#ef444422; border:1px solid #ef444444; color:#fca5a5; border-radius:8px; padding:10px 14px; font-size:13px; margin-top:10px; }
+        .succ { margin:20px 16px; background:#1e293b; border:2px solid #34d39944; border-radius:16px; padding:28px 20px; text-align:center; }
         .succ-icon { font-size:44px; margin-bottom:10px; }
         .succ-title { font-family:'Syne',sans-serif; font-size:20px; font-weight:800; color:#34d399; margin-bottom:6px; }
         .succ-sub { font-size:13px; color:#64748b; line-height:1.5; }
-        .succ-type { display:inline-block; margin-top:10px; padding:5px 14px; border-radius:20px;
-          font-size:12px; font-weight:700; background:#f59e0b22; color:#f59e0b; }
+        .succ-type { display:inline-block; margin-top:10px; padding:5px 14px; border-radius:20px; font-size:12px; font-weight:700; background:#f59e0b22; color:#f59e0b; }
         .who { padding:0 16px 32px; }
-        .who-title { font-family:'Syne',sans-serif; font-size:12px; font-weight:800; letter-spacing:2px;
-          text-transform:uppercase; color:#334155; margin:20px 0 14px; border-top:1px solid #1e293b; padding-top:20px; }
+        .who-title { font-family:'Syne',sans-serif; font-size:12px; font-weight:800; letter-spacing:2px; text-transform:uppercase; color:#334155; margin:20px 0 14px; border-top:1px solid #1e293b; padding-top:20px; }
         .who-section { margin-bottom:14px; }
         .who-lbl { font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase; margin-bottom:8px; }
         .who-chips { display:flex; flex-wrap:wrap; gap:7px; }
-        .chip { background:#1e293b; border-radius:20px; padding:5px 13px; font-size:13px;
-          font-weight:600; color:#f1f5f9; display:flex; align-items:center; gap:5px; }
+        .chip { background:#1e293b; border-radius:20px; padding:5px 13px; font-size:13px; font-weight:600; color:#f1f5f9; display:flex; align-items:center; gap:5px; }
         .chip-num { font-size:11px; color:#475569; }
-
-        /* LIST */
         .lw { padding:16px; max-width:540px; margin:0 auto; }
         .lh { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px; }
         .lt { font-family:'Syne',sans-serif; font-size:17px; font-weight:800; }
-        .exp-btn { background:#1e293b; border:1.5px solid #334155; color:#94a3b8;
-          font-size:12px; font-weight:600; padding:7px 12px; border-radius:8px; cursor:pointer; transition:all 0.2s; }
+        .exp-btn { background:#1e293b; border:1.5px solid #334155; color:#94a3b8; font-size:12px; font-weight:600; padding:7px 12px; border-radius:8px; cursor:pointer; transition:all 0.2s; }
         .exp-btn:hover { border-color:#f59e0b; color:#f59e0b; }
         .ls { margin-bottom:18px; }
-        .ls-hdr { font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase;
-          padding-bottom:6px; border-bottom:1px solid #1e293b; margin-bottom:8px; }
-        .lr { display:flex; align-items:center; gap:8px; padding:9px 12px;
-          background:#1e293b; border-radius:10px; margin-bottom:5px; }
+        .ls-hdr { font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase; padding-bottom:6px; border-bottom:1px solid #1e293b; margin-bottom:8px; }
+        .lr { display:flex; align-items:center; gap:8px; padding:9px 12px; background:#1e293b; border-radius:10px; margin-bottom:5px; }
         .lr-num { font-size:12px; color:#475569; width:16px; text-align:right; flex-shrink:0; }
         .lr-name { font-size:14px; font-weight:600; flex:1; }
         .lr-level { font-size:11px; color:#64748b; flex-shrink:0; }
         .lr-badge { font-size:11px; font-weight:700; padding:2px 8px; border-radius:14px; flex-shrink:0; }
-        .lr-del { background:none; border:none; color:#334155; cursor:pointer; font-size:13px;
-          padding:3px; border-radius:5px; transition:color 0.2s; }
-        .lr-del:hover { color:#ef4444; }
-        .total-bar { margin-top:16px; padding:13px 16px; background:#1e293b; border-radius:12px;
-          display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; }
-        .no-session { text-align:center; padding:60px 20px; color:#334155; }
+        .total-bar { margin-top:16px; padding:13px 16px; background:#1e293b; border-radius:12px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+        .no-session { text-align:center; padding:60px 20px; color:#475569; }
         .no-session .ico { font-size:44px; margin-bottom:12px; }
       `}</style>
 
-      {/* Nav */}
       <div className="nav">
         <button className={`nb${view === 'admin' ? ' on' : ''}`} onClick={() => setView('admin')}>⚙️ Setup</button>
         <button className={`nb${view === 'signup' ? ' on' : ''}`} onClick={() => setView('signup')}>
@@ -267,7 +243,6 @@ export default function App() {
         </button>
       </div>
 
-      {/* ── ADMIN ── */}
       {view === 'admin' && (
         !adminUnlocked ? (
           <div className="lock-wrap">
@@ -294,16 +269,15 @@ export default function App() {
                 <input className="inp" value={draft.time} onChange={e => setDraft(p => ({ ...p, time: e.target.value }))} />
               </div>
             </div>
-            <div className="fl"><label>Location</label>
+            <div className="fl"><label>Location Name</label>
               <input className="inp" value={draft.location} onChange={e => setDraft(p => ({ ...p, location: e.target.value }))} />
             </div>
             <div className="fl"><label>Google Maps Link</label>
-              <input className="inp" value={draft.mapUrl} onChange={e => setDraft(p => ({ ...p, mapUrl: e.target.value }))} />
+              <input className="inp" value={draft.mapUrl} onChange={e => setDraft(p => ({ ...p, mapUrl: e.target.value }))} placeholder="https://maps.google.com/..." />
             </div>
             <div className="fl"><label>Hosts</label>
               <input className="inp" value={draft.hosts} onChange={e => setDraft(p => ({ ...p, hosts: e.target.value }))} />
             </div>
-
             <div className="st">What's on offer?</div>
             <div className="tog-row">
               <label className={`tog${draft.offerTraining ? ' on' : ''}`}>
@@ -316,7 +290,6 @@ export default function App() {
               </label>
             </div>
             <p style={{ fontSize: 11, color: '#475569', marginBottom: 4 }}>Games Only is always available.</p>
-
             <div className="st">Spots Available</div>
             <div className="row2">
               <div className="fl"><label>Max Training</label>
@@ -326,7 +299,6 @@ export default function App() {
                 <input className="inp" type="number" value={draft.maxGames} onChange={e => setDraft(p => ({ ...p, maxGames: parseInt(e.target.value) || 0 }))} />
               </div>
             </div>
-
             <div className="st">Pricing (AED)</div>
             <div className="price-row">
               <div className="fl"><label>Training</label>
@@ -339,14 +311,12 @@ export default function App() {
                 <input className="inp" type="number" value={draft.prices.both} onChange={e => setDraft(p => ({ ...p, prices: { ...p.prices, both: parseInt(e.target.value) || 0 } }))} />
               </div>
             </div>
-
             <div className="st">Notes</div>
             <div className="fl">
               <textarea className="inp" rows={3} value={draft.notes} onChange={e => setDraft(p => ({ ...p, notes: e.target.value }))} style={{ resize: 'vertical' }} />
             </div>
-
-            <button className="pub-btn" onClick={publish}>
-              {session ? '🔄 UPDATE & REPUBLISH' : '🚀 PUBLISH SESSION'}
+            <button className="pub-btn" onClick={publish} disabled={publishing}>
+              {publishing ? 'Publishing…' : session ? '🔄 UPDATE & REPUBLISH' : '🚀 PUBLISH SESSION'}
             </button>
             <p style={{ textAlign: 'center', fontSize: 12, color: '#475569', marginTop: 10 }}>
               Share the Sign Up tab link in WhatsApp after publishing
@@ -355,10 +325,13 @@ export default function App() {
         )
       )}
 
-      {/* ── SIGNUP ── */}
       {view === 'signup' && (
         !session ? (
-          <div className="no-session"><div className="ico">⚙️</div><p>No session published yet.</p></div>
+          <div className="no-session">
+            <div className="ico">🏐</div>
+            <p style={{ fontSize: 15, marginBottom: 8 }}>No session open yet.</p>
+            <p style={{ fontSize: 13 }}>Check back soon or contact your host.</p>
+          </div>
         ) : (
           <div className="sw">
             <div className="sc">
@@ -370,14 +343,13 @@ export default function App() {
                 </div>}
                 <div className="sc-row"><span className="sc-icon">⏰</span>{session.time}</div>
                 <div className="sc-row"><span className="sc-icon">📍</span>
-                  <a href={session.mapUrl} target="_blank" rel="noreferrer" style={{ color: '#f59e0b', textDecoration: 'none' }}>{session.location}</a>
+                  <a href={safeMapUrl(session.mapUrl)} target="_blank" rel="noreferrer" style={{ color: '#f59e0b', textDecoration: 'none' }}>{session.location}</a>
                 </div>
                 <div className="sc-row"><span className="sc-icon">👋</span>Hosts: {session.hosts}</div>
                 {session.notes && <div className="sc-row"><span className="sc-icon">ℹ️</span>
                   <span style={{ fontSize: 12, color: '#64748b' }}>{session.notes}</span></div>}
               </div>
             </div>
-
             <div className="spots">
               {session.offerTraining && (
                 <div className="spot">
@@ -394,13 +366,11 @@ export default function App() {
                 <div className="spot-l">Signed up</div>
               </div>
             </div>
-
             <div className="prow">
               {session.offerTraining && <div className="pc"><div className="pa">{session.prices.training} AED</div><div className="pt">Training</div></div>}
               <div className="pc"><div className="pa">{session.prices.games} AED</div><div className="pt">Games</div></div>
               {session.offerTraining && session.offerBoth && <div className="pc"><div className="pa">{session.prices.both} AED</div><div className="pt">Both</div></div>}
             </div>
-
             {submitted ? (
               <>
                 <div className="succ">
@@ -422,11 +392,7 @@ export default function App() {
                       <div key={type} className="who-section">
                         <div className="who-lbl" style={{ color: TYPE_COLOR[type] }}>{type} ({group.length})</div>
                         <div className="who-chips">
-                          {group.map((s, i) => (
-                            <div key={i} className="chip">
-                              <span className="chip-num">{i + 1}.</span>{s.name}
-                            </div>
-                          ))}
+                          {group.map((s, i) => <div key={i} className="chip"><span className="chip-num">{i + 1}.</span>{s.name}</div>)}
                         </div>
                       </div>
                     );
@@ -451,7 +417,6 @@ export default function App() {
                     </div>
                   )}
                 </div>
-
                 <label className="fl-lbl">I'm joining for…</label>
                 <div className="type-btns">
                   {typeOptions.map(opt => (
@@ -465,12 +430,10 @@ export default function App() {
                     </button>
                   ))}
                 </div>
-
                 <button className="sub-btn" onClick={handleSignup} disabled={loading}>
                   {loading ? 'Signing up…' : 'SIGN ME UP →'}
                 </button>
                 {error && <div className="err">⚠️ {error}</div>}
-
                 {signups.length > 0 && (
                   <div className="who">
                     <div className="who-title">Who's Joining · {signups.length} players</div>
@@ -481,11 +444,7 @@ export default function App() {
                         <div key={type} className="who-section">
                           <div className="who-lbl" style={{ color: TYPE_COLOR[type] }}>{type} ({group.length})</div>
                           <div className="who-chips">
-                            {group.map((s, i) => (
-                              <div key={i} className="chip">
-                                <span className="chip-num">{i + 1}.</span>{s.name}
-                              </div>
-                            ))}
+                            {group.map((s, i) => <div key={i} className="chip"><span className="chip-num">{i + 1}.</span>{s.name}</div>)}
                           </div>
                         </div>
                       );
@@ -498,7 +457,6 @@ export default function App() {
         )
       )}
 
-      {/* ── LIST ── */}
       {view === 'list' && (
         !session ? (
           <div className="no-session"><div className="ico">📋</div><p>No session published yet.</p></div>
@@ -515,7 +473,6 @@ export default function App() {
                 a.download = `signups-${session.date}.csv`; a.click();
               }}>⬇ Export CSV</button>
             </div>
-
             {['Training + Games', 'Training Only', 'Games Only'].map(type => {
               const group = signups.filter(s => s.type === type);
               if (!group.length) return null;
@@ -527,9 +484,7 @@ export default function App() {
                       <span className="lr-num">{i + 1}</span>
                       <span className="lr-name">{s.name}</span>
                       <span className="lr-level">{s.level}</span>
-                      <span className="lr-badge" style={{ background: TYPE_COLOR[type] + '22', color: TYPE_COLOR[type] }}>
-                        {PRICES[s.type]} AED
-                      </span>
+                      <span className="lr-badge" style={{ background: TYPE_COLOR[type] + '22', color: TYPE_COLOR[type] }}>{PRICES[s.type]} AED</span>
                       <span style={{ fontSize: 11, fontWeight: 700, color: s.paid === 'Yes' ? '#34d399' : '#ef4444', flexShrink: 0 }}>
                         {s.paid === 'Yes' ? '✓' : '✗'}
                       </span>
@@ -538,9 +493,7 @@ export default function App() {
                 </div>
               );
             })}
-
             {signups.length === 0 && <div style={{ textAlign: 'center', color: '#334155', padding: '40px 0', fontSize: 14 }}>No signups yet.</div>}
-
             {signups.length > 0 && (
               <div className="total-bar">
                 <span style={{ fontSize: 13, color: '#64748b' }}>Expected total</span>
