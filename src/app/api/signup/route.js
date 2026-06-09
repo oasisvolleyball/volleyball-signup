@@ -18,7 +18,6 @@ export async function GET() {
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
 
-    // Get players — B is Name, D is Rating, E is Level (rows start at row 3)
     const playersRes = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Players!B3:E200',
@@ -28,7 +27,6 @@ export async function GET() {
       .filter(r => r[0] && r[0].trim() && r[0] !== 'Name')
       .map(r => ({ name: r[0], rating: r[2] || '—', level: r[3] || '—' }));
 
-    // Get saved session from Config sheet — row 2 is 'session'
     let session = null;
     try {
       const configRes = await sheets.spreadsheets.values.get({
@@ -40,13 +38,10 @@ export async function GET() {
       if (sessionRow && sessionRow[1] && sessionRow[1].trim()) {
         session = JSON.parse(sessionRow[1]);
       }
-    } catch (e) {
-      console.error('Config read error:', e.message);
-    }
+    } catch (e) {}
 
     return NextResponse.json({ players, session });
   } catch (err) {
-    console.error('GET error:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
@@ -57,23 +52,18 @@ export async function POST(request) {
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
 
-    // Session publish
     if (body.action === 'publish_session') {
       const { session } = body;
-      const sessionJson = JSON.stringify(session);
-
-      // Always update B2 directly since we know 'session' is in A2
       await sheets.spreadsheets.values.update({
         spreadsheetId: SPREADSHEET_ID,
         range: 'Config!B2',
         valueInputOption: 'RAW',
-        requestBody: { values: [[sessionJson]] },
+        requestBody: { values: [[JSON.stringify(session)]] },
       });
-
       return NextResponse.json({ success: true });
     }
 
-    // Player signup — columns: #, Date, Name, Rating, Level, Type, Paid, Amount
+    // Sheet columns: A=#, B=Date, C=Amount, D=Paid, E=Name, F=Type, G=Rating, H=Level
     const { date, name, type, amount, isNewPlayer } = body;
 
     await sheets.spreadsheets.values.append({
@@ -81,7 +71,7 @@ export async function POST(request) {
       range: 'Sessions!A:H',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [['', date, name, '', '', type, 'No', amount]],
+        values: [['', date, amount, 'No', name, type, '', '']],
       },
     });
 
@@ -98,7 +88,6 @@ export async function POST(request) {
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error('POST error:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
