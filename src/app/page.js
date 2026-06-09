@@ -107,7 +107,8 @@ export default function App() {
     }
     setLoading(true);
     const isNewPlayer = !players.find(p => p.name.toLowerCase() === name.toLowerCase());
-    const amount = PRICES[form.type] || 0;
+    const sessionPrices = { 'Training Only': session?.prices?.training || 0, 'Games Only': session?.prices?.games || 0, 'Training + Games': session?.prices?.both || 0 };
+    const amount = sessionPrices[form.type] || 0;
     try {
       const res = await fetch('/api/signup', {
         method: 'POST',
@@ -142,9 +143,9 @@ export default function App() {
     : [];
 
   const typeOptions = [
-    { key: 'Training Only', sub: '7:00–7:30 PM · Beginner & novice', price: session?.prices?.training || 15, show: session?.offerTraining, full: trainingLeft <= 0 },
-    { key: 'Games Only', sub: '7:30–10:00 PM', price: session?.prices?.games || 30, show: true, full: gamesLeft <= 0 },
-    { key: 'Training + Games', sub: 'Full evening · 7:00–10:00 PM', price: session?.prices?.both || 40, show: session?.offerTraining && session?.offerBoth, full: trainingLeft <= 0 || gamesLeft <= 0 },
+    { key: 'Training Only', sub: '', price: session?.prices?.training || 15, show: session?.offerTraining, full: trainingLeft <= 0 },
+    { key: 'Games Only', sub: '', price: session?.prices?.games || 30, show: true, full: gamesLeft <= 0 },
+    { key: 'Training + Games', sub: '', price: session?.prices?.both || 40, show: session?.offerTraining && session?.offerBoth, full: trainingLeft <= 0 || gamesLeft <= 0 },
   ].filter(o => o.show);
 
   return (
@@ -388,7 +389,7 @@ export default function App() {
                   <div className="succ-icon">🎉</div>
                   <div className="succ-title">You're in!</div>
                   <div className="succ-sub">See you on the court, <strong>{form.name}</strong>!<br />Payment due on the night.</div>
-                  <div className="succ-type">{form.type} · {PRICES[form.type]} AED</div>
+                  <div className="succ-type">{form.type} · {typeOptions.find(o => o.key === form.type)?.price || 0} AED</div>
                   <button onClick={() => { setSubmitted(false); setForm({ name: '', type: '' }); }}
                     style={{ marginTop: 16, background: 'none', border: '1px solid #334155', color: '#64748b', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 12 }}>
                     Sign up another player
@@ -422,7 +423,6 @@ export default function App() {
                       {suggestions.map(p => (
                         <div key={p.name} className="sugg" onClick={() => setForm(f => ({ ...f, name: p.name }))}>
                           <span style={{ fontWeight: 600 }}>{p.name}</span>
-                          <span style={{ fontSize: 11, color: '#64748b' }}>{p.level}</span>
                         </div>
                       ))}
                     </div>
@@ -478,7 +478,7 @@ export default function App() {
                 {session.date ? new Date(session.date + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'Session'} · {signups.length} signed up
               </div>
               <button className="exp-btn" onClick={() => {
-                const rows = ['Name,Type,Amount (AED),Paid', ...signups.map(s => `${s.name},${s.type},${PRICES[s.type]},${s.paid}`)];
+                const rows = ['Name,Type,Amount (AED),Paid', ...signups.map(s => `${s.name},${s.type},${s.amount || 0},${s.paid}`)];
                 const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
                 const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
                 a.download = `signups-${session.date}.csv`; a.click();
@@ -510,7 +510,7 @@ export default function App() {
               <div className="total-bar">
                 <span style={{ fontSize: 13, color: '#64748b' }}>Expected total</span>
                 <span style={{ fontFamily: "'Syne',sans-serif", fontSize: 16, fontWeight: 800, color: '#f59e0b' }}>
-                  {signups.reduce((s, p) => s + (PRICES[p.type] || 0), 0)} AED
+                  {signups.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)} AED
                 </span>
               </div>
             )}
