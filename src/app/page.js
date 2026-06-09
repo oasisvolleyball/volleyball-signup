@@ -1,4 +1,4 @@
- 'use client';
+'use client';
 import { useState, useEffect, useCallback } from 'react';
 
 const TYPE_COLOR = { 'Training Only': '#a78bfa', 'Games Only': '#38bdf8', 'Training + Games': '#f59e0b' };
