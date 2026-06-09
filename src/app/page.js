@@ -125,15 +125,26 @@ export default function App() {
     }
   };
 
+  const removeSignup = async (name) => {
+    try {
+      await fetch('/api/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove_signup', date: session.date, name }),
+      });
+      fetchSignups();
+    } catch (e) {}
+  };
+
   const suggestions = form.name.trim().length > 1
     ? players.filter(p => p.name.toLowerCase().startsWith(form.name.trim().toLowerCase()) &&
         !signups.find(s => s.name.toLowerCase() === p.name.toLowerCase())).slice(0, 4)
     : [];
 
   const typeOptions = [
-    { key: 'Training Only', sub: '', price: session?.prices?.training || 15, show: session?.offerTraining, full: trainingLeft <= 0 },
-    { key: 'Games Only', sub: '', price: session?.prices?.games || 30, show: true, full: gamesLeft <= 0 },
-    { key: 'Training + Games', sub: '', price: session?.prices?.both || 40, show: session?.offerTraining && session?.offerBoth, full: trainingLeft <= 0 || gamesLeft <= 0 },
+    { key: 'Training Only', sub: '7:00–7:30 PM · Beginner & novice', price: session?.prices?.training || 15, show: session?.offerTraining, full: trainingLeft <= 0 },
+    { key: 'Games Only', sub: '7:30–10:00 PM', price: session?.prices?.games || 30, show: true, full: gamesLeft <= 0 },
+    { key: 'Training + Games', sub: 'Full evening · 7:00–10:00 PM', price: session?.prices?.both || 40, show: session?.offerTraining && session?.offerBoth, full: trainingLeft <= 0 || gamesLeft <= 0 },
   ].filter(o => o.show);
 
   return (
@@ -265,10 +276,9 @@ export default function App() {
               <div className="fl"><label>Date</label>
                 <input className="inp" type="date" value={draft.date} onChange={e => setDraft(p => ({ ...p, date: e.target.value }))} />
               </div>
-              <div className="fl"><label>Session Times</label>
-  <input className="inp" value={draft.time} onChange={e => setDraft(p => ({ ...p, time: e.target.value }))}
-    placeholder="e.g. Training 7:00–7:30 PM · Games 7:30–10:00 PM" />
-</div>
+              <div className="fl"><label>Time</label>
+                <input className="inp" value={draft.time} onChange={e => setDraft(p => ({ ...p, time: e.target.value }))} />
+              </div>
             </div>
             <div className="fl"><label>Location Name</label>
               <input className="inp" value={draft.location} onChange={e => setDraft(p => ({ ...p, location: e.target.value }))} />
@@ -378,7 +388,7 @@ export default function App() {
                   <div className="succ-icon">🎉</div>
                   <div className="succ-title">You're in!</div>
                   <div className="succ-sub">See you on the court, <strong>{form.name}</strong>!<br />Payment due on the night.</div>
-                  <div className="succ-type">{form.type} · {typeOptions.find(o => o.key === form.type)?.price || PRICES[form.type]} AED</div>
+                  <div className="succ-type">{form.type} · {PRICES[form.type]} AED</div>
                   <button onClick={() => { setSubmitted(false); setForm({ name: '', type: '' }); }}
                     style={{ marginTop: 16, background: 'none', border: '1px solid #334155', color: '#64748b', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 12 }}>
                     Sign up another player
@@ -412,6 +422,7 @@ export default function App() {
                       {suggestions.map(p => (
                         <div key={p.name} className="sugg" onClick={() => setForm(f => ({ ...f, name: p.name }))}>
                           <span style={{ fontWeight: 600 }}>{p.name}</span>
+                          <span style={{ fontSize: 11, color: '#64748b' }}>{p.level}</span>
                         </div>
                       ))}
                     </div>
@@ -484,10 +495,11 @@ export default function App() {
                       <span className="lr-num">{i + 1}</span>
                       <span className="lr-name">{s.name}</span>
                       <span className="lr-level">{s.level}</span>
-                      <span className="lr-badge" style={{ background: TYPE_COLOR[type] + '22', color: TYPE_COLOR[type] }}>{PRICES[s.type]} AED</span>
+                      <span className="lr-badge" style={{ background: TYPE_COLOR[type] + '22', color: TYPE_COLOR[type] }}>{s.amount || PRICES[s.type]} AED</span>
                       <span style={{ fontSize: 11, fontWeight: 700, color: s.paid === 'Yes' ? '#34d399' : '#ef4444', flexShrink: 0 }}>
                         {s.paid === 'Yes' ? '✓' : '✗'}
                       </span>
+                      <button className="lr-del" onClick={() => removeSignup(s.name)} title="Remove">✕</button>
                     </div>
                   ))}
                 </div>
