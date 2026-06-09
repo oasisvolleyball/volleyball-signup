@@ -22,6 +22,8 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const date = searchParams.get('date');
+    if (!date) return NextResponse.json({ signups: [] });
+
     const formattedDate = formatDate(date);
 
     const auth = getAuth();
@@ -34,16 +36,22 @@ export async function GET(request) {
 
     const rows = response.data.values || [];
     // Columns: A=#, B=Date, C=Amount, D=Paid, E=Name, F=Type, G=Rating, H=Level
+    // Skip first 3 header rows
+    // Only include rows where Date matches AND Name is non-empty and not '—'
     const signups = rows
       .slice(3)
-      .filter(r => r[1] === formattedDate && r[4] && r[4].trim())
+      .filter(r => {
+        const rowDate = (r[1] || '').trim();
+        const rowName = (r[4] || '').trim();
+        return rowDate === formattedDate && rowName !== '' && rowName !== '—';
+      })
       .map(r => ({
         name: r[4] || '',
         type: r[5] || '',
         paid: r[3] || 'No',
         amount: parseFloat(r[2]) || 0,
-        rating: r[6] || '—',
-        level: r[7] || '—',
+        rating: r[6] || '',
+        level: r[7] || '',
       }));
 
     return NextResponse.json({ signups });
