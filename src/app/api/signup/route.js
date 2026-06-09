@@ -13,6 +13,12 @@ function getAuth() {
   });
 }
 
+function formatDate(dateStr) {
+  // Convert 2026-06-12 to 12 Jun 2026
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 export async function GET() {
   try {
     const auth = getAuth();
@@ -63,15 +69,17 @@ export async function POST(request) {
       return NextResponse.json({ success: true });
     }
 
+    // Player signup
     // Sheet columns: A=#, B=Date, C=Amount, D=Paid, E=Name, F=Type, G=Rating, H=Level
     const { date, name, type, amount, isNewPlayer } = body;
+    const formattedDate = formatDate(date);
 
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Sessions!A:H',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [['', date, amount, 'No', name, type, '', '']],
+        values: [['', formattedDate, amount, 'No', name, type, '', '']],
       },
     });
 
@@ -81,7 +89,7 @@ export async function POST(request) {
         range: 'Players!A:G',
         valueInputOption: 'USER_ENTERED',
         requestBody: {
-          values: [['', name, '', '', '', 'New – set rating', date]],
+          values: [['', name, '', '', '', 'New – set rating', formattedDate]],
         },
       });
     }
