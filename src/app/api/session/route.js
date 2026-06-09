@@ -13,10 +13,16 @@ function getAuth() {
   });
 }
 
+function formatDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const date = searchParams.get('date');
+    const formattedDate = formatDate(date);
 
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
@@ -30,7 +36,7 @@ export async function GET(request) {
     // Columns: A=#, B=Date, C=Amount, D=Paid, E=Name, F=Type, G=Rating, H=Level
     const signups = rows
       .slice(3)
-      .filter(r => r[1] === date && r[4] && r[4].trim())
+      .filter(r => r[1] === formattedDate && r[4] && r[4].trim())
       .map(r => ({
         name: r[4] || '',
         type: r[5] || '',
