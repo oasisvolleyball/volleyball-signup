@@ -377,7 +377,7 @@ export default function App() {
                   <div className="succ-icon">🎉</div>
                   <div className="succ-title">You're in!</div>
                   <div className="succ-sub">See you on the court, <strong>{form.name}</strong>!<br />Payment due on the night.</div>
-                  <div className="succ-type">{form.type} · {PRICES[form.type]} AED</div>
+                  <div className="succ-type">{form.type} · {typeOptions.find(o => o.key === form.type)?.price || PRICES[form.type]} AED</div>
                   <button onClick={() => { setSubmitted(false); setForm({ name: '', type: '' }); }}
                     style={{ marginTop: 16, background: 'none', border: '1px solid #334155', color: '#64748b', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 12 }}>
                     Sign up another player
@@ -411,7 +411,6 @@ export default function App() {
                       {suggestions.map(p => (
                         <div key={p.name} className="sugg" onClick={() => setForm(f => ({ ...f, name: p.name }))}>
                           <span style={{ fontWeight: 600 }}>{p.name}</span>
-                          <span style={{ fontSize: 11, color: '#64748b' }}>{p.level}</span>
                         </div>
                       ))}
                     </div>
