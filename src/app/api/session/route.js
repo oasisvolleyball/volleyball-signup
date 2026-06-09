@@ -41,7 +41,7 @@ export async function GET(request) {
         name: r[4] || '',
         type: r[5] || '',
         paid: r[3] || 'No',
-        amount: r[2] || 0,
+        amount: parseFloat(r[2]) || 0,
         rating: r[6] || '—',
         level: r[7] || '—',
       }));
