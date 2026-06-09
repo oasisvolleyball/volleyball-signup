@@ -69,6 +69,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [sessionCounts, setSessionCounts] = useState({}); // sessionId -> signup count
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'volleyball2025';
@@ -78,7 +79,21 @@ export default function App() {
       .then(r => r.json())
       .then(d => {
         setPlayers(d.players || []);
-        setSessions(d.sessions || []);
+        const loaded = d.sessions || [];
+        setSessions(loaded);
+        // Load signup counts for each session
+        loaded.forEach(s => {
+          if (!s.date) return;
+          fetch(`/api/session?date=${encodeURIComponent(s.date)}`)
+            .then(r => r.json())
+            .then(data => {
+              const count = (data.signups || []).filter(p =>
+                p.type === 'Games Only' || p.type === 'Training + Games'
+              ).length;
+              setSessionCounts(prev => ({ ...prev, [s.id]: count }));
+            })
+            .catch(() => {});
+        });
       })
       .catch(() => {});
   }, []);
@@ -413,12 +428,17 @@ export default function App() {
                       <div className="pick-meta">👋 Hosts: {s.hosts}</div>
                       <div className="pick-spots">
                         <div className="pick-spot">
-                          <div className="pick-spot-n" style={{color:'#34d399'}}>{s.maxGames}</div>
-                          <div className="pick-spot-l">available spots</div>
+                          {(() => {
+                            const rem = s.maxGames - (sessionCounts[s.id] || 0);
+                            return <>
+                              <div className="pick-spot-n" style={{color:rem===0?'#ef4444':rem<=5?'#f59e0b':'#34d399'}}>{rem}</div>
+                              <div className="pick-spot-l">spots remaining</div>
+                            </>;
+                          })()}
                         </div>
                         <div className="pick-spot">
-                          <div className="pick-spot-n" style={{color:'#f59e0b'}}>Open</div>
-                          <div className="pick-spot-l">status</div>
+                          <div className="pick-spot-n" style={{color:'#94a3b8'}}>{sessionCounts[s.id] || 0}</div>
+                          <div className="pick-spot-l">signed up</div>
                         </div>
                       </div>
                     </div>
@@ -453,12 +473,12 @@ export default function App() {
                 {sess.offerTraining && (
                   <div className="spot">
                     <div className="spot-n" style={{color:trainingLeft===0?'#ef4444':trainingLeft<=3?'#f59e0b':'#34d399'}}>{trainingLeft}</div>
-                    <div className="spot-l">Training left</div>
+                    <div className="spot-l">Training spots left</div>
                   </div>
                 )}
                 <div className="spot">
                   <div className="spot-n" style={{color:gamesLeft===0?'#ef4444':gamesLeft<=5?'#f59e0b':'#34d399'}}>{gamesLeft}</div>
-                  <div className="spot-l">Games left</div>
+                  <div className="spot-l">Spots left</div>
                 </div>
                 <div className="spot">
                   <div className="spot-n" style={{color:'#94a3b8'}}>{signups.length}</div>
@@ -483,6 +503,10 @@ export default function App() {
                       style={{marginTop:16,background:'none',border:'1px solid #334155',color:'#64748b',borderRadius:8,padding:'7px 14px',cursor:'pointer',fontSize:12}}>
                       Sign up another player
                     </button>
+                  </div>
+                  <div style={{margin:'18px 16px 0',background:'#1e293b',border:'1.5px solid #334155',borderRadius:10,padding:'12px 14px',fontSize:12,color:'#94a3b8',lineHeight:1.6}}>
+                    <strong style={{color:'#f1f5f9',display:'block',marginBottom:4}}>Cancellation Policy</strong>
+                    You may remove your name if you can no longer join. If cancelling less than 12 hours before the game, please message the hosts in the <a href={WHATSAPP_GROUP} target="_blank" rel="noreferrer" style={{color:'#25D366',textDecoration:'none'}}>WhatsApp group</a>. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
                   </div>
                   {/* Public who's joining — names only, no levels, no prices */}
                   <div className="who">
@@ -548,6 +572,11 @@ export default function App() {
 
                   {/* Who's joining shown before submitting too */}
                   {signups.length > 0 && (
+                    <>
+                    <div style={{margin:'18px 16px 0',background:'#1e293b',border:'1.5px solid #334155',borderRadius:10,padding:'12px 14px',fontSize:12,color:'#94a3b8',lineHeight:1.6}}>
+                      <strong style={{color:'#f1f5f9',display:'block',marginBottom:4}}>Cancellation Policy</strong>
+                      You may remove your name if you can no longer join. If cancelling less than 12 hours before the game, please message the hosts in the <a href={WHATSAPP_GROUP} target="_blank" rel="noreferrer" style={{color:'#25D366',textDecoration:'none'}}>WhatsApp group</a>. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
+                    </div>
                     <div className="who">
                       <div className="who-title">Who's Joining · {signups.length} players</div>
                       {['Training + Games','Training Only','Games Only'].map(type => {
