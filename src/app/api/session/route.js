@@ -14,47 +14,214 @@ function getAuth() {
 }
 
 function formatDate(dateStr) {
+  // Converts 2026-06-13 -> "13 Jun 2026"
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-export async function GET(request) {
+async function getSheetsClient() {
+  const auth = getAuth();
+  return google.sheets({ version: 'v4', auth });
+}
+
+async function loadSessions(sheets) {
   try {
-    const { searchParams } = new URL(request.url);
-    const date = searchParams.get('date');
-    if (!date) return NextResponse.json({ signups: [] });
-
-    const formattedDate = formatDate(date);
-
-    const auth = getAuth();
-    const sheets = google.sheets({ version: 'v4', auth });
-
-    const response = await sheets.spreadsheets.values.get({
+    const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sessions!A:H',
+      range: 'Config!A1:B10',
     });
+    const rows = res.data.values || [];
+    const sessionsRow = rows.find(r => r[0] === 'sessions');
+    if (sessionsRow && sessionsRow[1] && sessionsRow[1].trim()) {
+      return JSON.parse(sessionsRow[1]);
+    }
+    // Fallback: try old single-session format
+    const sessionRow = rows.find(r => r[0] === 'session');
+    if (sessionRow && sessionRow[1] && sessionRow[1].trim()) {
+      const s = JSON.parse(sessionRow[1]);
+      return [s];
+    }
+    return [];
+  } catch (e) {
+    return [];
+  }
+}
 
-    const rows = response.data.values || [];
-    // Columns: A=#, B=Date, C=Amount, D=Paid, E=Name, F=Type, G=Rating, H=Level
-    // Skip first 3 header rows
-    // Only include rows where Date matches AND Name is non-empty and not '—'
-    const signups = rows
-      .slice(3)
-      .filter(r => {
-        const rowDate = (r[1] || '').trim();
-        const rowName = (r[4] || '').trim();
-        return rowDate === formattedDate && rowName !== '' && rowName !== '—';
-      })
+async function saveSessions(sheets, sessions) {
+  // Find the row index of 'sessions' key
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'Config!A1:B20',
+  });
+  const rows = res.data.values || [];
+  const idx = rows.findIndex(r => r[0] === 'sessions');
+  if (idx >= 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Config!B${idx + 1}`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [[JSON.stringify(sessions)]] },
+    });
+  } else {
+    // Append new row
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Config!A:B',
+      valueInputOption: 'RAW',
+      requestBody: { values: [['sessions', JSON.stringify(sessions)]] },
+    });
+  }
+}
+
+async function findNextEmptySessionRow(sheets) {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'Sessions!B1:B2000',
+  });
+  const rows = res.data.values || [];
+  // Skip first 3 header rows, find first row where B is empty or '—'
+  for (let i = 3; i < rows.length; i++) {
+    const val = rows[i] ? (rows[i][0] || '').trim() : '';
+    if (!val || val === '—') return i + 1;
+  }
+  return rows.length + 1;
+}
+
+async function findNextEmptyPlayerRow(sheets) {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: 'Players!B3:B500',
+  });
+  const rows = res.data.values || [];
+  for (let i = 0; i < rows.length; i++) {
+    const val = rows[i] ? (rows[i][0] || '').trim() : '';
+    if (!val) return i + 3;
+  }
+  return rows.length + 3;
+}
+
+export async function GET() {
+  try {
+    const sheets = await getSheetsClient();
+
+    // Load players
+    const playersRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: 'Players!B3:E500',
+    });
+    const playerRows = playersRes.data.values || [];
+    const players = playerRows
+      .filter(r => r[0] && r[0].trim() && r[0] !== 'Name')
       .map(r => ({
-        name: r[4] || '',
-        type: r[5] || '',
-        paid: r[3] || 'No',
-        amount: parseFloat(r[2]) || 0,
-        rating: r[6] || '',
-        level: r[7] || '',
+        name: r[0].trim(),
+        rating: r[2] || '',
+        level: r[3] || '',
       }));
 
-    return NextResponse.json({ signups });
+    // Load sessions
+    const sessions = await loadSessions(sheets);
+
+    return NextResponse.json({ players, sessions });
+  } catch (err) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(request) {
+  try {
+    const body = await request.json();
+    const sheets = await getSheetsClient();
+
+    // ── Publish / update a session ──
+    if (body.action === 'publish_session') {
+      const sessions = await loadSessions(sheets);
+      const { session } = body;
+      const existing = sessions.findIndex(s => s.id === session.id);
+      if (existing >= 0) {
+        sessions[existing] = session;
+      } else {
+        sessions.push(session);
+      }
+      await saveSessions(sheets, sessions);
+      return NextResponse.json({ success: true });
+    }
+
+    // ── Close / delete a session ──
+    if (body.action === 'close_session') {
+      const sessions = await loadSessions(sheets);
+      const updated = sessions.filter(s => s.id !== body.sessionId);
+      await saveSessions(sheets, updated);
+      return NextResponse.json({ success: true });
+    }
+
+    // ── Remove a signup ──
+    if (body.action === 'remove_signup') {
+      const { date, name } = body;
+      const formattedDate = formatDate(date);
+      const res = await sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Sessions!A:H',
+      });
+      const rows = res.data.values || [];
+      const rowIndex = rows.findIndex(r => r[1] === formattedDate && r[4] === name);
+      if (rowIndex >= 0) {
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `Sessions!A${rowIndex + 1}:H${rowIndex + 1}`,
+          valueInputOption: 'RAW',
+          requestBody: { values: [['', '', '', '', '', '', '', '']] },
+        });
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    // ── Player signup ──
+    if (body.action === 'signup' || (!body.action && body.name)) {
+      const { date, name, type, amount, isNewPlayer } = body;
+      const formattedDate = formatDate(date);
+
+      // Look up player rating and level
+      const playersRes = await sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range: 'Players!B3:E500',
+      });
+      const playerRows = playersRes.data.values || [];
+      const playerMatch = playerRows.find(
+        r => r[0] && r[0].trim().toLowerCase() === name.trim().toLowerCase()
+      );
+      const rating = playerMatch ? (playerMatch[2] || '') : '';
+      const level = playerMatch ? (playerMatch[3] || '') : '';
+
+      // Find next empty row in Sessions
+      const nextRow = await findNextEmptySessionRow(sheets);
+
+      // Write signup: A=#blank, B=Date, C=Amount, D=Paid, E=Name, F=Type, G=Rating, H=Level
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SPREADSHEET_ID,
+        range: `Sessions!A${nextRow}:H${nextRow}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: {
+          values: [['', formattedDate, amount, 'No', name, type, rating, level]],
+        },
+      });
+
+      // Add new player to Players sheet if needed
+      if (isNewPlayer) {
+        const nextPlayerRow = await findNextEmptyPlayerRow(sheets);
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `Players!A${nextPlayerRow}:G${nextPlayerRow}`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: {
+            values: [['', name.trim(), '', '', '', 'New – set rating', formattedDate]],
+          },
+        });
+      }
+
+      return NextResponse.json({ success: true, row: nextRow });
+    }
+
+    return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
