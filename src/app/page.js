@@ -1,4 +1,4 @@
-'use client';
+ 'use client';
 import { useState, useEffect, useCallback } from 'react';
 
 const PRICES = { 'Training Only': 15, 'Games Only': 30, 'Training + Games': 40 };
