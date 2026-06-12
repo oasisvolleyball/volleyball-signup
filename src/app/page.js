@@ -130,7 +130,7 @@ export default function App() {
     { key: 'Training Only', price: sess.prices.training, show: sess.offerTraining, full: trainingLeft <= 0, waitlist: false },
     { key: 'Games Only', price: sess.prices.games, show: true, full: gamesLeft <= 0, waitlist: false },
     { key: 'Training + Games', price: sess.prices.both, show: sess.offerTraining && sess.offerBoth, full: trainingLeft <= 0 || gamesLeft <= 0, waitlist: false },
-    { key: 'Waitlist', price: 0, show: gamesLeft <= 0, full: false, waitlist: true },
+    { key: 'Waitlist', price: sess.prices.games, show: gamesLeft <= 0, full: false, waitlist: true },
   ].filter(o => o.show) : [];
 
   function getAmount(type) {
@@ -522,7 +522,7 @@ export default function App() {
                     <div className="succ-title">You're in!</div>
                     <div className="succ-sub">See you on the court, <strong>{form.name}</strong>!<br/>Payment due on the night.</div>
                     {form.type === 'Waitlist'
-                      ? <div className="succ-type" style={{background:'#f8717122',color:'#f87171'}}>📋 On the Waitlist · We'll let you know if a spot opens</div>
+                      ? <div className="succ-type" style={{background:'#f8717122',color:'#f87171'}}>📋 On the Waitlist · {sess?.prices?.games} AED only if a spot becomes available</div>
                       : <div className="succ-type">{form.type} · {getAmount(form.type)} AED</div>
                     }
                     <button onClick={() => { setSubmitted(false); setForm({name:'',type:''}); }}
@@ -593,10 +593,11 @@ export default function App() {
                             {opt.waitlist ? '📋 Join Waitlist' : opt.key}
                             {opt.full && <span style={{fontSize:11,color:'#ef4444',marginLeft:8}}>FULL</span>}
                           </div>
-                          {opt.waitlist && <div style={{fontSize:11,color:'#64748b',marginTop:2}}>You'll be notified if a spot opens</div>}
+                          {opt.waitlist && <div style={{fontSize:11,color:'#64748b',marginTop:2}}>Only payable if a spot becomes available</div>}
                         </div>
-                        <div className="tbtn-price" style={opt.waitlist ? {color:'#f87171'} : undefined}>
-                          {opt.waitlist ? 'Free' : `${opt.price} AED`}
+                        <div style={{textAlign:'right',flexShrink:0}}>
+                          <div className="tbtn-price" style={{color:'#f87171'}}>{sess.prices.games} AED</div>
+                          {opt.waitlist && <div style={{fontSize:10,color:'#64748b',marginTop:1}}>if confirmed</div>}
                         </div>
                       </button>
                     ))}
