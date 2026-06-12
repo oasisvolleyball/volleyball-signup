@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 
-const TYPE_COLOR = { 'Training Only': '#a78bfa', 'Games Only': '#38bdf8', 'Training + Games': '#f59e0b' };
+const TYPE_COLOR = { 'Training Only': '#a78bfa', 'Games Only': '#38bdf8', 'Training + Games': '#f59e0b', 'Waitlist': '#f87171' };
 const WHATSAPP_GROUP = 'https://chat.whatsapp.com/GD7I8r3fnTNLAEN6s6q2b7';
 
 function safeMapUrl(url) {
@@ -23,6 +23,10 @@ function formatShortDate(dateStr) {
 
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function isWaitlist(type) {
+  return type && type.startsWith('Waitlist');
 }
 
 function isWithin12Hours(session) {
@@ -88,7 +92,7 @@ export default function App() {
             .then(r => r.json())
             .then(data => {
               const count = (data.signups || []).filter(p =>
-                p.type === 'Games Only' || p.type === 'Training + Games'
+                (p.type === 'Games Only' || p.type === 'Training + Games') && !isWaitlist(p.type)
               ).length;
               setSessionCounts(prev => ({ ...prev, [s.id]: count }));
             })
@@ -116,15 +120,17 @@ export default function App() {
   }, [fetchSignups]);
 
   const sess = selectedSession;
-  const trainingCount = signups.filter(s => s.type === 'Training Only' || s.type === 'Training + Games').length;
-  const gamesCount = signups.filter(s => s.type === 'Games Only' || s.type === 'Training + Games').length;
+  const trainingCount = signups.filter(s => (s.type === 'Training Only' || s.type === 'Training + Games') && !isWaitlist(s.type)).length;
+  const gamesCount = signups.filter(s => (s.type === 'Games Only' || s.type === 'Training + Games') && !isWaitlist(s.type)).length;
+  const waitlistCount = signups.filter(s => isWaitlist(s.type)).length;
   const trainingLeft = sess ? (sess.maxTraining - trainingCount) : 0;
   const gamesLeft = sess ? (sess.maxGames - gamesCount) : 0;
 
   const typeOptions = sess ? [
-    { key: 'Training Only', price: sess.prices.training, show: sess.offerTraining, full: trainingLeft <= 0 },
-    { key: 'Games Only', price: sess.prices.games, show: true, full: gamesLeft <= 0 },
-    { key: 'Training + Games', price: sess.prices.both, show: sess.offerTraining && sess.offerBoth, full: trainingLeft <= 0 || gamesLeft <= 0 },
+    { key: 'Training Only', price: sess.prices.training, show: sess.offerTraining, full: trainingLeft <= 0, waitlist: false },
+    { key: 'Games Only', price: sess.prices.games, show: true, full: gamesLeft <= 0, waitlist: false },
+    { key: 'Training + Games', price: sess.prices.both, show: sess.offerTraining && sess.offerBoth, full: trainingLeft <= 0 || gamesLeft <= 0, waitlist: false },
+    { key: 'Waitlist', price: 0, show: gamesLeft <= 0, full: false, waitlist: true },
   ].filter(o => o.show) : [];
 
   function getAmount(type) {
@@ -132,6 +138,7 @@ export default function App() {
     if (type === 'Training Only') return sess.prices.training;
     if (type === 'Games Only') return sess.prices.games;
     if (type === 'Training + Games') return sess.prices.both;
+    if (type === 'Waitlist') return 0;
     return 0;
   }
 
@@ -186,7 +193,7 @@ export default function App() {
       setError('Sorry, training is full!'); return;
     }
     if ((form.type === 'Games Only' || form.type === 'Training + Games') && gamesLeft <= 0) {
-      setError('Sorry, games is full!'); return;
+      setError('Sorry, games is full! You can join the waitlist instead.'); return;
     }
     setLoading(true);
     const isNewPlayer = !players.find(p => p.name.toLowerCase() === name.toLowerCase());
@@ -498,7 +505,10 @@ export default function App() {
                     <div className="succ-icon">🎉</div>
                     <div className="succ-title">You're in!</div>
                     <div className="succ-sub">See you on the court, <strong>{form.name}</strong>!<br/>Payment due on the night.</div>
-                    <div className="succ-type">{form.type} · {getAmount(form.type)} AED</div>
+                    {form.type === 'Waitlist'
+                      ? <div className="succ-type" style={{background:'#f8717122',color:'#f87171'}}>📋 On the Waitlist · We'll let you know if a spot opens</div>
+                      : <div className="succ-type">{form.type} · {getAmount(form.type)} AED</div>
+                    }
                     <button onClick={() => { setSubmitted(false); setForm({name:'',type:''}); }}
                       style={{marginTop:16,background:'none',border:'1px solid #334155',color:'#64748b',borderRadius:8,padding:'7px 14px',cursor:'pointer',fontSize:12}}>
                       Sign up another player
@@ -510,8 +520,8 @@ export default function App() {
                   </div>
                   {/* Public who's joining — names only, no levels, no prices */}
                   <div className="who">
-                    <div className="who-title">Who's Joining · {signups.length} players</div>
-                    {['Training + Games','Training Only','Games Only'].map(type => {
+                    <div className="who-title">Who's Joining · {signups.filter(s => !isWaitlist(s.type)).length} players {waitlistCount > 0 ? `· ${waitlistCount} on waitlist` : ''}</div>
+                    {['Training + Games','Training Only','Games Only','Waitlist'].map(type => {
                       const group = signups.filter(s => s.type === type);
                       if (!group.length) return null;
                       const locked = isWithin12Hours(sess);
@@ -558,10 +568,20 @@ export default function App() {
                   <label className="fl-lbl">I'm joining for…</label>
                   <div className="type-btns">
                     {typeOptions.map(opt => (
-                      <button key={opt.key} className={`tbtn${form.type===opt.key?' sel':''}${opt.full?' dis':''}`}
+                      <button key={opt.key}
+                        className={`tbtn${form.type===opt.key?' sel':''}${opt.full?' dis':''}`}
+                        style={opt.waitlist ? {borderColor: form.type===opt.key ? '#f87171' : '#334155', background: form.type===opt.key ? '#f8717111' : undefined} : undefined}
                         onClick={() => !opt.full && setForm(p => ({...p,type:opt.key}))}>
-                        <div className="tbtn-name">{opt.key}{opt.full && <span style={{fontSize:11,color:'#ef4444',marginLeft:8}}>FULL</span>}</div>
-                        <div className="tbtn-price">{opt.price} AED</div>
+                        <div>
+                          <div className="tbtn-name" style={opt.waitlist ? {color:'#f87171'} : undefined}>
+                            {opt.waitlist ? '📋 Join Waitlist' : opt.key}
+                            {opt.full && <span style={{fontSize:11,color:'#ef4444',marginLeft:8}}>FULL</span>}
+                          </div>
+                          {opt.waitlist && <div style={{fontSize:11,color:'#64748b',marginTop:2}}>You'll be notified if a spot opens</div>}
+                        </div>
+                        <div className="tbtn-price" style={opt.waitlist ? {color:'#f87171'} : undefined}>
+                          {opt.waitlist ? 'Free' : `${opt.price} AED`}
+                        </div>
                       </button>
                     ))}
                   </div>
@@ -578,8 +598,8 @@ export default function App() {
                       You may remove your name if you can no longer join. If cancelling less than 12 hours before the game, please message the hosts in the <a href={WHATSAPP_GROUP} target="_blank" rel="noreferrer" style={{color:'#25D366',textDecoration:'none'}}>WhatsApp group</a>. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
                     </div>
                     <div className="who">
-                      <div className="who-title">Who's Joining · {signups.length} players</div>
-                      {['Training + Games','Training Only','Games Only'].map(type => {
+                      <div className="who-title">Who's Joining · {signups.filter(s => !isWaitlist(s.type)).length} players {waitlistCount > 0 ? `· ${waitlistCount} on waitlist` : ''}</div>
+                      {['Training + Games','Training Only','Games Only','Waitlist'].map(type => {
                         const group = signups.filter(s => s.type === type);
                         if (!group.length) return null;
                         const locked = isWithin12Hours(sess);
@@ -756,7 +776,7 @@ export default function App() {
                     }}>⬇ Export CSV</button>
                   </div>
 
-                  {['Training + Games','Training Only','Games Only'].map(type => {
+                  {['Training + Games','Training Only','Games Only','Waitlist'].map(type => {
                     const group = signups.filter(s => s.type === type);
                     if (!group.length) return null;
                     return (
@@ -782,7 +802,7 @@ export default function App() {
                     <div className="total-bar">
                       <span style={{fontSize:13,color:'#64748b'}}>Expected total</span>
                       <span style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800,color:'#f59e0b'}}>
-                        {signups.reduce((sum,s) => sum + (parseFloat(s.amount)||0), 0)} AED
+                        {signups.filter(s => !isWaitlist(s.type)).reduce((sum,s) => sum + (parseFloat(s.amount)||0), 0)} AED
                       </span>
                     </div>
                   )}
