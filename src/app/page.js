@@ -215,9 +215,16 @@ export default function App() {
     }
   };
 
-  const removeSignup = async (name, sessionForRemoval) => {
+  const removeSignup = async (name, sessionForRemoval, isPlayerSelf = false) => {
     const target = sessionForRemoval || (view === 'admin' ? listSession : selectedSession);
     if (!target) return;
+
+    // For player-facing removal, confirm first
+    if (isPlayerSelf) {
+      const confirmed = window.confirm(`Remove ${name} from the list? You'll be asked to notify the WhatsApp group.`);
+      if (!confirmed) return;
+    }
+
     try {
       await fetch('/api/signup', {
         method: 'POST',
@@ -225,6 +232,15 @@ export default function App() {
         body: JSON.stringify({ action: 'remove_signup', date: target.date, name }),
       });
       fetchSignups();
+
+      // Open WhatsApp with pre-filled cancellation message (player-facing only)
+      if (isPlayerSelf) {
+        const dateStr = formatDisplayDate(target.date);
+        const msg = encodeURIComponent(
+          `Hi everyone! ${name} has cancelled their spot for ${target.title} on ${dateStr}. A spot is now available — waitlisted players please let the hosts know if you'd like to join! 🏐`
+        );
+        window.open(`https://wa.me/${WHATSAPP_GROUP.replace('https://chat.whatsapp.com/', '')}?text=${msg}`, '_blank');
+      }
     } catch (e) {}
   };
 
@@ -516,7 +532,7 @@ export default function App() {
                   </div>
                   <div style={{margin:'18px 16px 0',background:'#1e293b',border:'1.5px solid #334155',borderRadius:10,padding:'12px 14px',fontSize:12,color:'#94a3b8',lineHeight:1.6}}>
                     <strong style={{color:'#f1f5f9',display:'block',marginBottom:4}}>Cancellation Policy</strong>
-                    You may remove your name if you can no longer join. If cancelling less than 12 hours before the game, please message the hosts in the <a href={WHATSAPP_GROUP} target="_blank" rel="noreferrer" style={{color:'#25D366',textDecoration:'none'}}>WhatsApp group</a>. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
+                    You may remove your name if you can no longer join — when you do, you'll be prompted to send a notification to the WhatsApp group so waitlisted players can take your spot. Cancelling less than 12 hours before the game please message the hosts directly. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
                   </div>
                   {/* Public who's joining — names only, no levels, no prices */}
                   <div className="who">
@@ -595,7 +611,7 @@ export default function App() {
                     <>
                     <div style={{margin:'18px 16px 0',background:'#1e293b',border:'1.5px solid #334155',borderRadius:10,padding:'12px 14px',fontSize:12,color:'#94a3b8',lineHeight:1.6}}>
                       <strong style={{color:'#f1f5f9',display:'block',marginBottom:4}}>Cancellation Policy</strong>
-                      You may remove your name if you can no longer join. If cancelling less than 12 hours before the game, please message the hosts in the <a href={WHATSAPP_GROUP} target="_blank" rel="noreferrer" style={{color:'#25D366',textDecoration:'none'}}>WhatsApp group</a>. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
+                      You may remove your name if you can no longer join — when you do, you'll be prompted to send a notification to the WhatsApp group so waitlisted players can take your spot. Cancelling less than 12 hours before the game please message the hosts directly. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
                     </div>
                     <div className="who">
                       <div className="who-title">Who's Joining · {signups.filter(s => !isWaitlist(s.type)).length} players {waitlistCount > 0 ? `· ${waitlistCount} on waitlist` : ''}</div>
@@ -613,7 +629,7 @@ export default function App() {
                                   {s.name}
                                   {locked
                                     ? <span className="chip-locked" title="Locked within 12 hours">🔒</span>
-                                    : <button className="chip-del" onClick={() => removeSignup(s.name, sess)} title="Remove">✕</button>
+                                    : <button className="chip-del" onClick={() => removeSignup(s.name, sess, true)} title="Remove your name">✕</button>
                                   }
                                 </div>
                               ))}
