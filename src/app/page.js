@@ -528,7 +528,7 @@ export default function App() {
                   </div>
                   <div style={{margin:'18px 16px 0',background:'#1e293b',border:'1.5px solid #334155',borderRadius:10,padding:'12px 14px',fontSize:12,color:'#94a3b8',lineHeight:1.6}}>
                     <strong style={{color:'#f1f5f9',display:'block',marginBottom:4}}>Cancellation Policy</strong>
-                    You may remove your name if you can no longer join — when you do, you'll be prompted to send a notification to the WhatsApp group so waitlisted players can take your spot. Cancelling less than 12 hours before the game please message the hosts directly. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
+                    You may remove your name if you can no longer join. Cancelling less than 12 hours before the game please message the hosts directly. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
                   </div>
                   {/* Public who's joining — names only, no levels, no prices */}
                   <div className="who">
@@ -608,7 +608,7 @@ export default function App() {
                     <>
                     <div style={{margin:'18px 16px 0',background:'#1e293b',border:'1.5px solid #334155',borderRadius:10,padding:'12px 14px',fontSize:12,color:'#94a3b8',lineHeight:1.6}}>
                       <strong style={{color:'#f1f5f9',display:'block',marginBottom:4}}>Cancellation Policy</strong>
-                      You may remove your name if you can no longer join — when you do, you'll be prompted to send a notification to the WhatsApp group so waitlisted players can take your spot. Cancelling less than 12 hours before the game please message the hosts directly. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
+                      You may remove your name if you can no longer join. Cancelling less than 12 hours before the game please message the hosts directly. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
                     </div>
                     <div className="who">
                       <div className="who-title">Who's Joining · {signups.filter(s => !isWaitlist(s.type)).length} players {waitlistCount > 0 ? `· ${waitlistCount} on waitlist` : ''}</div>
