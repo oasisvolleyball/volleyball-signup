@@ -229,17 +229,14 @@ export default function App() {
       const res = await fetch('/api/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'remove_signup', date: target.date, name }),
+        body: JSON.stringify({ 
+          action: 'remove_signup', 
+          date: target.date, 
+          name,
+          sessionTitle: target.title || '',
+        }),
       });
-      const data = await res.json();
       fetchSignups();
-
-      // Only open WhatsApp if someone was promoted from waitlist
-      if (isPlayerSelf && data.promoted) {
-        const dateStr = formatDisplayDate(target.date);
-        const msg = encodeURIComponent(`${name} out`);
-        window.open(`https://wa.me/917501986469?text=${msg}`, '_blank');
-      }
     } catch (e) {}
   };
 
