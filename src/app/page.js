@@ -226,20 +226,19 @@ export default function App() {
     }
 
     try {
-      await fetch('/api/signup', {
+      const res = await fetch('/api/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'remove_signup', date: target.date, name }),
       });
+      const data = await res.json();
       fetchSignups();
 
-      // Open WhatsApp with pre-filled cancellation message (player-facing only)
-      if (isPlayerSelf) {
+      // Only open WhatsApp if someone was promoted from waitlist
+      if (isPlayerSelf && data.promoted) {
         const dateStr = formatDisplayDate(target.date);
-        const msg = encodeURIComponent(
-          `Hi everyone! ${name} has cancelled their spot for ${target.title} on ${dateStr}. A spot is now available — waitlisted players please let the hosts know if you'd like to join! 🏐`
-        );
-        window.open(`https://wa.me/${WHATSAPP_GROUP.replace('https://chat.whatsapp.com/', '')}?text=${msg}`, '_blank');
+        const msg = encodeURIComponent(`${name} out`);
+        window.open(`https://wa.me/917501986469?text=${msg}`, '_blank');
       }
     } catch (e) {}
   };
