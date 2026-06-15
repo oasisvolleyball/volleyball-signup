@@ -154,7 +154,7 @@ export async function POST(request) {
       return NextResponse.json({ success: true });
     }
 
-    // ── Remove a signup ──
+    // ── Remove a signup and auto-promote first waitlisted person ──
     if (body.action === 'remove_signup') {
       const { date, name } = body;
       const formattedDate = formatDate(date);
@@ -163,6 +163,8 @@ export async function POST(request) {
         range: 'Sessions!A:H',
       });
       const rows = res.data.values || [];
+
+      // Find and clear the cancelled row
       const rowIndex = rows.findIndex(r => r[1] === formattedDate && r[4] === name);
       if (rowIndex >= 0) {
         await sheets.spreadsheets.values.update({
@@ -172,7 +174,31 @@ export async function POST(request) {
           requestBody: { values: [['', '', '', '', '', '', '', '']] },
         });
       }
-      return NextResponse.json({ success: true });
+
+      // Find first waitlisted person for this session
+      const waitlistRow = rows.find((r, i) => 
+        i !== rowIndex &&
+        r[1] === formattedDate && 
+        r[4] && r[4].trim() && 
+        r[5] === 'Waitlist'
+      );
+
+      let promoted = null;
+      if (waitlistRow) {
+        const waitlistRowIndex = rows.indexOf(waitlistRow);
+        // Get the amount for Games Only from the session (stored in their row)
+        const amount = waitlistRow[2] || 0;
+        // Promote to Games Only
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `Sessions!A${waitlistRowIndex + 1}:H${waitlistRowIndex + 1}`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: { values: [[waitlistRow[0], waitlistRow[1], amount, 'No', waitlistRow[4], 'Games Only', waitlistRow[6], waitlistRow[7]]] },
+        });
+        promoted = waitlistRow[4];
+      }
+
+      return NextResponse.json({ success: true, promoted });
     }
 
     // ── Player signup ──
