@@ -154,18 +154,26 @@ export async function POST(request) {
       return NextResponse.json({ success: true });
     }
 
-    // ── Remove a signup and auto-promote first waitlisted person ──
+    // ── Remove a signup, log cancellation, auto-promote waitlist ──
     if (body.action === 'remove_signup') {
-      const { date, name } = body;
+      const { date, name, sessionTitle } = body;
       const formattedDate = formatDate(date);
+      const now = new Date().toLocaleString('en-GB', { 
+        day: '2-digit', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', hour12: true 
+      });
+
       const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
         range: 'Sessions!A:H',
       });
       const rows = res.data.values || [];
 
-      // Find and clear the cancelled row
+      // Find the cancelled row to get their type
       const rowIndex = rows.findIndex(r => r[1] === formattedDate && r[4] === name);
+      const cancelledType = rowIndex >= 0 ? (rows[rowIndex][5] || '') : '';
+
+      // Clear the cancelled row
       if (rowIndex >= 0) {
         await sheets.spreadsheets.values.update({
           spreadsheetId: SPREADSHEET_ID,
@@ -176,19 +184,17 @@ export async function POST(request) {
       }
 
       // Find first waitlisted person for this session
-      const waitlistRow = rows.find((r, i) => 
+      const waitlistRow = rows.find((r, i) =>
         i !== rowIndex &&
-        r[1] === formattedDate && 
-        r[4] && r[4].trim() && 
+        r[1] === formattedDate &&
+        r[4] && r[4].trim() &&
         r[5] === 'Waitlist'
       );
 
       let promoted = null;
       if (waitlistRow) {
         const waitlistRowIndex = rows.indexOf(waitlistRow);
-        // Get the amount for Games Only from the session (stored in their row)
         const amount = waitlistRow[2] || 0;
-        // Promote to Games Only
         await sheets.spreadsheets.values.update({
           spreadsheetId: SPREADSHEET_ID,
           range: `Sessions!A${waitlistRowIndex + 1}:H${waitlistRowIndex + 1}`,
@@ -196,6 +202,22 @@ export async function POST(request) {
           requestBody: { values: [[waitlistRow[0], waitlistRow[1], amount, 'No', waitlistRow[4], 'Games Only', waitlistRow[6], waitlistRow[7]]] },
         });
         promoted = waitlistRow[4];
+      }
+
+      // Log to Cancellations sheet
+      // Columns: Date Cancelled, Player Name, Session Date, Session Title, Type, Promoted Player
+      try {
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: SPREADSHEET_ID,
+          range: 'Cancellations!A:F',
+          valueInputOption: 'USER_ENTERED',
+          requestBody: {
+            values: [[now, name, formattedDate, sessionTitle || '', cancelledType, promoted || '']],
+          },
+        });
+      } catch (e) {
+        // Don't fail if Cancellations sheet doesn't exist yet
+        console.error('Cancellations log error:', e.message);
       }
 
       return NextResponse.json({ success: true, promoted });
