@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 const TYPE_COLOR = { 'Training Only': '#a78bfa', 'Games Only': '#38bdf8', 'Training + Games': '#f59e0b', 'Waitlist': '#f87171' };
 const WHATSAPP_GROUP = 'https://chat.whatsapp.com/GD7I8r3fnTNLAEN6s6q2b7';
 
+function isWaitlist(type) { return type && type.startsWith('Waitlist'); }
+
 function safeMapUrl(url) {
   if (!url) return '#';
   return url.startsWith('http://') || url.startsWith('https://') ? url : 'https://' + url;
@@ -25,17 +27,11 @@ function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-function isWaitlist(type) {
-  return type && type.startsWith('Waitlist');
-}
-
 function isWithin12Hours(session) {
   if (!session?.date || !session?.time) return false;
   try {
-    // Parse time like "8:30 PM" or "7:00 PM – 10:00 PM" — take the start time
     const startTime = session.time.split('–')[0].trim();
-    const dateTimeStr = session.date + ' ' + startTime;
-    const sessionDate = new Date(dateTimeStr);
+    const sessionDate = new Date(session.date + ' ' + startTime);
     if (isNaN(sessionDate)) return false;
     const diff = sessionDate - Date.now();
     return diff >= 0 && diff <= 12 * 60 * 60 * 1000;
@@ -60,12 +56,13 @@ const EMPTY_SESSION = {
 
 export default function App() {
   const [view, setView] = useState('signup');
-  const [adminView, setAdminView] = useState('setup'); // 'setup' | 'list'
+  const [adminView, setAdminView] = useState('setup');
   const [sessions, setSessions] = useState([]);
   const [players, setPlayers] = useState([]);
-  const [selectedSession, setSelectedSession] = useState(null);
-  const [listSession, setListSession] = useState(null);
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const [listSessionId, setListSessionId] = useState(null);
   const [signups, setSignups] = useState([]);
+  const [sessionCounts, setSessionCounts] = useState({});
   const [draft, setDraft] = useState({ ...EMPTY_SESSION, id: genId() });
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ name: '', type: '' });
@@ -73,10 +70,13 @@ export default function App() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  const [sessionCounts, setSessionCounts] = useState({}); // sessionId -> signup count
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'volleyball2025';
+
+  // Always derive sess and listSession from live sessions array — never stale
+  const sess = selectedSessionId ? sessions.find(s => s.id === selectedSessionId) || null : null;
+  const listSession = listSessionId ? sessions.find(s => s.id === listSessionId) || null : null;
 
   const loadData = useCallback(() => {
     fetch('/api/signup')
@@ -85,7 +85,6 @@ export default function App() {
         setPlayers(d.players || []);
         const loaded = d.sessions || [];
         setSessions(loaded);
-        // Load signup counts for each session
         loaded.forEach(s => {
           if (!s.date) return;
           fetch(`/api/session?date=${encodeURIComponent(s.date)}`)
@@ -102,11 +101,9 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useEffect(() => { loadData(); }, [loadData]);
 
-  const activeDate = (view === 'admin' ? listSession?.date : selectedSession?.date) || null;
+  const activeDate = (view === 'admin' ? listSession?.date : sess?.date) || null;
 
   const fetchSignups = useCallback(() => {
     if (!activeDate) return;
@@ -123,8 +120,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [fetchSignups]);
 
-  // Always derive sess from live sessions array so price updates are reflected immediately
-  const sess = selectedSession ? (sessions.find(s => s.id === selectedSession.id) || selectedSession) : null;
   const trainingCount = signups.filter(s => (s.type === 'Training Only' || s.type === 'Training + Games') && !isWaitlist(s.type)).length;
   const gamesCount = signups.filter(s => (s.type === 'Games Only' || s.type === 'Training + Games') && !isWaitlist(s.type)).length;
   const waitlistCount = signups.filter(s => isWaitlist(s.type)).length;
@@ -157,7 +152,7 @@ export default function App() {
         body: JSON.stringify({ action: 'publish_session', session: draft }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed'); }
-      await loadData();
+      loadData();
       setDraft({ ...EMPTY_SESSION, id: genId() });
       setEditingId(null);
       alert('Session published!');
@@ -176,9 +171,9 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'close_session', sessionId }),
       });
-      await loadData();
-      if (selectedSession?.id === sessionId) setSelectedSession(null);
-      if (listSession?.id === sessionId) setListSession(null);
+      loadData();
+      if (selectedSessionId === sessionId) setSelectedSessionId(null);
+      if (listSessionId === sessionId) setListSessionId(null);
     } catch (e) { alert('Failed to close session.'); }
   };
 
@@ -219,25 +214,17 @@ export default function App() {
   };
 
   const removeSignup = async (name, sessionForRemoval, isPlayerSelf = false) => {
-    const target = sessionForRemoval || (view === 'admin' ? listSession : selectedSession);
+    const target = sessionForRemoval || (view === 'admin' ? listSession : sess);
     if (!target) return;
-
-    // For player-facing removal, confirm first
     if (isPlayerSelf) {
-      const confirmed = window.confirm(`Remove ${name} from the list? You'll be asked to notify the WhatsApp group.`);
+      const confirmed = window.confirm(`Remove ${name} from the list?`);
       if (!confirmed) return;
     }
-
     try {
-      const res = await fetch('/api/signup', {
+      await fetch('/api/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          action: 'remove_signup', 
-          date: target.date, 
-          name,
-          sessionTitle: target.title || '',
-        }),
+        body: JSON.stringify({ action: 'remove_signup', date: target.date, name, sessionTitle: target.title || '' }),
       });
       fetchSignups();
     } catch (e) {}
@@ -258,15 +245,12 @@ export default function App() {
     .nb { flex:1; padding:13px 6px; text-align:center; border:none; background:none; font-size:12px; font-weight:600; color:#64748b; cursor:pointer; border-bottom:3px solid transparent; margin-bottom:-1px; transition:all 0.2s; }
     .nb.on { color:#f8fafc; border-bottom-color:#f59e0b; }
     .badge { background:#f59e0b22; color:#f59e0b; font-size:11px; font-weight:700; border-radius:10px; padding:1px 6px; margin-left:4px; }
-    .page { max-width:480px; margin:0 auto; padding:0; }
-    /* Lock */
+    .page { max-width:480px; margin:0 auto; }
     .lock-wrap { max-width:320px; margin:60px auto; padding:0 20px; text-align:center; }
     .lock-title { font-family:'Syne',sans-serif; font-size:22px; font-weight:800; margin-bottom:20px; color:#f1f5f9; }
-    /* Admin tabs */
     .admin-tabs { display:flex; background:#0f172a; border-bottom:1px solid #1e293b; }
     .atb { flex:1; padding:10px; text-align:center; border:none; background:none; font-size:12px; font-weight:600; color:#475569; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; transition:all 0.2s; }
     .atb.on { color:#f59e0b; border-bottom-color:#f59e0b; }
-    /* Forms */
     .aw { padding:20px 16px; }
     .st { font-family:'Syne',sans-serif; font-size:10px; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:#f59e0b; margin:20px 0 10px; }
     .fl { margin-bottom:12px; }
@@ -285,7 +269,6 @@ export default function App() {
     .pub-btn { width:100%; margin-top:24px; background:#f59e0b; color:#0f172a; border:none; border-radius:12px; font-family:'Syne',sans-serif; font-size:16px; font-weight:800; padding:14px; cursor:pointer; letter-spacing:1px; transition:all 0.2s; }
     .pub-btn:hover { background:#fbbf24; }
     .pub-btn:disabled { opacity:0.6; cursor:not-allowed; }
-    /* Session cards in admin */
     .sess-card { background:#1e293b; border:1.5px solid #334155; border-radius:12px; padding:14px 16px; margin-bottom:10px; }
     .sess-card-title { font-family:'Syne',sans-serif; font-size:15px; font-weight:800; color:#f1f5f9; margin-bottom:3px; }
     .sess-card-meta { font-size:12px; color:#64748b; margin-bottom:10px; }
@@ -295,7 +278,6 @@ export default function App() {
     .btn-edit:hover { background:#f59e0b22; }
     .btn-close { color:#ef4444; border-color:#ef444444; }
     .btn-close:hover { background:#ef444422; }
-    /* Picker */
     .pick-card { background:#1e293b; border:1.5px solid #334155; border-radius:12px; padding:14px 16px; margin-bottom:10px; cursor:pointer; transition:border-color 0.2s; }
     .pick-card:hover { border-color:#475569; }
     .pick-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:4px; }
@@ -306,7 +288,6 @@ export default function App() {
     .pick-spot { flex:1; background:#0f172a; border-radius:8px; padding:6px 8px; text-align:center; }
     .pick-spot-n { font-family:'Syne',sans-serif; font-size:18px; font-weight:800; }
     .pick-spot-l { font-size:10px; color:#475569; text-transform:uppercase; letter-spacing:1px; }
-    /* Session header */
     .sc { background:linear-gradient(135deg,#1e293b,#0f172a); padding:22px 20px 18px; border-bottom:2px solid #f59e0b33; position:relative; overflow:hidden; }
     .sc::before { content:'🏐'; position:absolute; right:16px; top:50%; transform:translateY(-50%); font-size:72px; opacity:0.06; pointer-events:none; }
     .sc-back { font-size:12px; color:#64748b; cursor:pointer; margin-bottom:10px; display:inline-flex; align-items:center; gap:4px; transition:color 0.2s; background:none; border:none; padding:0; }
@@ -316,19 +297,16 @@ export default function App() {
     .sc-meta { margin-top:10px; display:flex; flex-direction:column; gap:4px; }
     .sc-row { display:flex; align-items:flex-start; gap:8px; font-size:13px; color:#94a3b8; }
     .sc-icon { width:18px; text-align:center; flex-shrink:0; }
-    /* Spots bar */
     .spots { display:flex; background:#1e293b; border-bottom:1px solid #334155; }
     .spot { flex:1; padding:12px 8px; text-align:center; border-right:1px solid #334155; }
     .spot:last-child { border-right:none; }
     .spot-n { font-family:'Syne',sans-serif; font-size:22px; font-weight:800; }
     .spot-l { font-size:10px; color:#475569; text-transform:uppercase; letter-spacing:1px; margin-top:2px; }
-    /* Price row */
     .prow { display:flex; background:#0f172a; border-bottom:1px solid #1e293b; }
     .pc { flex:1; padding:10px 6px; text-align:center; border-right:1px solid #1e293b; }
     .pc:last-child { border-right:none; }
     .pa { font-family:'Syne',sans-serif; font-size:16px; font-weight:700; color:#f59e0b; }
     .pt { font-size:10px; color:#475569; text-transform:uppercase; letter-spacing:1px; margin-top:2px; }
-    /* Signup form */
     .fa { padding:20px 16px; }
     .fl-lbl { font-size:11px; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:1px; margin-bottom:7px; display:block; }
     .name-wrap { position:relative; margin-bottom:18px; }
@@ -346,13 +324,11 @@ export default function App() {
     .sub-btn:hover { background:#fbbf24; }
     .sub-btn:disabled { opacity:0.6; cursor:not-allowed; }
     .err { background:#ef444422; border:1px solid #ef444444; color:#fca5a5; border-radius:8px; padding:10px 14px; font-size:13px; margin-top:10px; }
-    /* Success */
     .succ { margin:20px 16px; background:#1e293b; border:2px solid #34d39944; border-radius:16px; padding:28px 20px; text-align:center; }
     .succ-icon { font-size:44px; margin-bottom:10px; }
     .succ-title { font-family:'Syne',sans-serif; font-size:20px; font-weight:800; color:#34d399; margin-bottom:6px; }
     .succ-sub { font-size:13px; color:#64748b; line-height:1.5; }
     .succ-type { display:inline-block; margin-top:10px; padding:5px 14px; border-radius:20px; font-size:12px; font-weight:700; background:#f59e0b22; color:#f59e0b; }
-    /* Who's joining (public) */
     .who { padding:0 16px 24px; }
     .who-title { font-family:'Syne',sans-serif; font-size:11px; font-weight:800; letter-spacing:2px; text-transform:uppercase; color:#334155; margin:20px 0 12px; border-top:1px solid #1e293b; padding-top:18px; }
     .who-section { margin-bottom:12px; }
@@ -363,14 +339,12 @@ export default function App() {
     .chip-del { background:none; border:none; color:#334155; cursor:pointer; font-size:12px; padding:0 0 0 2px; line-height:1; transition:color 0.2s; }
     .chip-del:hover { color:#ef4444; }
     .chip-locked { color:#475569; font-size:11px; cursor:default; }
-    /* WhatsApp banner */
     .wa-banner { margin:16px 16px 0; background:#1e293b; border:1.5px solid #25D36622; border-radius:12px; padding:12px 14px; display:flex; align-items:center; gap:10px; text-decoration:none; transition:border-color 0.2s; }
     .wa-banner:hover { border-color:#25D36666; }
     .wa-icon { font-size:22px; flex-shrink:0; }
     .wa-text { font-size:13px; color:#94a3b8; flex:1; }
     .wa-text strong { color:#f1f5f9; display:block; margin-bottom:1px; }
     .wa-arrow { font-size:14px; color:#25D366; flex-shrink:0; }
-    /* Admin list */
     .lw { padding:16px; }
     .lh { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px; }
     .lt { font-family:'Syne',sans-serif; font-size:17px; font-weight:800; color:#f1f5f9; }
@@ -394,25 +368,60 @@ export default function App() {
     .list-sess-date { font-size:12px; color:#64748b; margin-top:2px; }
     .no-session { text-align:center; padding:60px 20px; color:#475569; }
     .no-session .ico { font-size:44px; margin-bottom:12px; }
-    .cancel-note { margin:0 16px 24px; background:#1e293b; border-radius:10px; padding:12px 14px; font-size:12px; color:#64748b; line-height:1.5; }
+    .cancel-note { margin:0 16px 16px; background:#1e293b; border-radius:10px; padding:12px 14px; font-size:12px; color:#64748b; line-height:1.5; }
     .cancel-note a { color:#25D366; text-decoration:none; }
   `;
 
+  const CancellationPolicy = () => (
+    <div className="cancel-note">
+      <strong style={{color:'#94a3b8',display:'block',marginBottom:4}}>Cancellation Policy</strong>
+      You may remove your name if you can no longer join. Cancelling less than 12 hours before the game please message the hosts directly. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
+    </div>
+  );
+
+  const WhosList = ({ session }) => (
+    <div className="who">
+      <div className="who-title">
+        Who's Joining · {signups.filter(s => !isWaitlist(s.type)).length} players
+        {waitlistCount > 0 ? ` · ${waitlistCount} on waitlist` : ''}
+      </div>
+      {['Training + Games', 'Training Only', 'Games Only', 'Waitlist'].map(type => {
+        const group = signups.filter(s => s.type === type);
+        if (!group.length) return null;
+        const locked = isWithin12Hours(session);
+        return (
+          <div key={type} className="who-section">
+            <div className="who-lbl" style={{color: TYPE_COLOR[type]}}>{type} ({group.length})</div>
+            <div className="who-chips">
+              {group.map((s, i) => (
+                <div key={i} className="chip">
+                  <span className="chip-num">{i + 1}.</span>
+                  {s.name}
+                  {locked
+                    ? <span className="chip-locked" title="Locked within 12 hours">🔒</span>
+                    : <button className="chip-del" onClick={() => removeSignup(s.name, session, true)} title="Remove your name">✕</button>
+                  }
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
-    <div style={{ fontFamily:"'DM Sans',sans-serif", minHeight:'100vh', background:'#0f172a', color:'#f1f5f9' }}>
+    <div style={{fontFamily:"'DM Sans',sans-serif", minHeight:'100vh', background:'#0f172a', color:'#f1f5f9'}}>
       <style>{CSS}</style>
 
-      {/* Nav — only 2 tabs */}
       <div className="nav">
         <button className={`nb${view==='signup'?' on':''}`} onClick={() => setView('signup')}>
           🏐 Sign Up {sessions.length > 0 && <span className="badge">{sessions.length}</span>}
         </button>
-        <button className={`nb${view==='admin'?' on':''}`} onClick={() => setView('admin')}>
-          🔒 Admin
-        </button>
+        <button className={`nb${view==='admin'?' on':''}`} onClick={() => setView('admin')}>🔒 Admin</button>
       </div>
 
-      {/* ══════════════════════ SIGN UP TAB ══════════════════════ */}
+      {/* ══ SIGN UP ══ */}
       {view === 'signup' && (
         <div className="page">
           {sessions.length === 0 ? (
@@ -428,19 +437,17 @@ export default function App() {
                 <span className="wa-arrow">→</span>
               </a>
             </>
-          ) : !selectedSession ? (
-            // Session picker
+          ) : !selectedSessionId ? (
             <>
               <div style={{padding:'20px 16px 8px'}}>
                 <div style={{fontFamily:"'Syne',sans-serif",fontSize:11,fontWeight:800,letterSpacing:3,textTransform:'uppercase',color:'#475569',marginBottom:14}}>
                   Select a session
                 </div>
                 {sessions.map(s => {
-                  const priceLabel = s.offerTraining
-                    ? `${s.prices.training}–${s.prices.both} AED`
-                    : `${s.prices.games} AED`;
+                  const priceLabel = s.offerTraining ? `${s.prices.training}–${s.prices.both} AED` : `${s.prices.games} AED`;
+                  const rem = s.maxGames - (sessionCounts[s.id] || 0);
                   return (
-                    <div key={s.id} className="pick-card" onClick={() => { setSelectedSession(s); setSubmitted(false); setForm({name:'',type:''}); setError(''); }}>
+                    <div key={s.id} className="pick-card" onClick={() => { setSelectedSessionId(s.id); setSubmitted(false); setForm({name:'',type:''}); setError(''); }}>
                       <div className="pick-header">
                         <div className="pick-title">{s.title}</div>
                         <div className="pick-price">{priceLabel}</div>
@@ -450,13 +457,8 @@ export default function App() {
                       <div className="pick-meta">👋 Hosts: {s.hosts}</div>
                       <div className="pick-spots">
                         <div className="pick-spot">
-                          {(() => {
-                            const rem = s.maxGames - (sessionCounts[s.id] || 0);
-                            return <>
-                              <div className="pick-spot-n" style={{color:rem===0?'#ef4444':rem<=5?'#f59e0b':'#34d399'}}>{rem}</div>
-                              <div className="pick-spot-l">spots remaining</div>
-                            </>;
-                          })()}
+                          <div className="pick-spot-n" style={{color:rem===0?'#ef4444':rem<=5?'#f59e0b':'#34d399'}}>{rem}</div>
+                          <div className="pick-spot-l">spots remaining</div>
                         </div>
                         <div className="pick-spot">
                           <div className="pick-spot-n" style={{color:'#94a3b8'}}>{sessionCounts[s.id] || 0}</div>
@@ -473,11 +475,10 @@ export default function App() {
                 <span className="wa-arrow">→</span>
               </a>
             </>
-          ) : (
-            // Signup form
+          ) : sess ? (
             <>
               <div className="sc">
-                <button className="sc-back" onClick={() => { setSelectedSession(null); setSubmitted(false); }}>← Back to sessions</button>
+                <button className="sc-back" onClick={() => { setSelectedSessionId(null); setSubmitted(false); }}>← Back to sessions</button>
                 <div className="sc-tag">Volleyball Social · Abu Dhabi</div>
                 <div className="sc-title">{sess.title}</div>
                 <div className="sc-meta">
@@ -503,9 +504,15 @@ export default function App() {
                   <div className="spot-l">Spots left</div>
                 </div>
                 <div className="spot">
-                  <div className="spot-n" style={{color:'#94a3b8'}}>{signups.length}</div>
+                  <div className="spot-n" style={{color:'#94a3b8'}}>{signups.filter(s => !isWaitlist(s.type)).length}</div>
                   <div className="spot-l">Signed up</div>
                 </div>
+                {waitlistCount > 0 && (
+                  <div className="spot">
+                    <div className="spot-n" style={{color:'#f87171'}}>{waitlistCount}</div>
+                    <div className="spot-l">Waitlist</div>
+                  </div>
+                )}
               </div>
 
               <div className="prow">
@@ -521,7 +528,7 @@ export default function App() {
                     <div className="succ-title">You're in!</div>
                     <div className="succ-sub">See you on the court, <strong>{form.name}</strong>!<br/>Payment due on the night.</div>
                     {form.type === 'Waitlist'
-                      ? <div className="succ-type" style={{background:'#f8717122',color:'#f87171'}}>📋 On the Waitlist · {sess?.prices?.games} AED only if a spot becomes available</div>
+                      ? <div className="succ-type" style={{background:'#f8717122',color:'#f87171'}}>📋 On the Waitlist · Payment only if confirmed</div>
                       : <div className="succ-type">{form.type} · {getAmount(form.type)} AED</div>
                     }
                     <button onClick={() => { setSubmitted(false); setForm({name:'',type:''}); }}
@@ -529,39 +536,11 @@ export default function App() {
                       Sign up another player
                     </button>
                   </div>
-                  <div style={{margin:'18px 16px 0',background:'#1e293b',border:'1.5px solid #334155',borderRadius:10,padding:'12px 14px',fontSize:12,color:'#94a3b8',lineHeight:1.6}}>
-                    <strong style={{color:'#f1f5f9',display:'block',marginBottom:4}}>Cancellation Policy</strong>
-                    You may remove your name if you can no longer join. Cancelling less than 12 hours before the game please message the hosts directly. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
-                  </div>
-                  {/* Public who's joining — names only, no levels, no prices */}
-                  <div className="who">
-                    <div className="who-title">Who's Joining · {signups.filter(s => !isWaitlist(s.type)).length} players {waitlistCount > 0 ? `· ${waitlistCount} on waitlist` : ''}</div>
-                    {['Training + Games','Training Only','Games Only','Waitlist'].map(type => {
-                      const group = signups.filter(s => s.type === type);
-                      if (!group.length) return null;
-                      const locked = isWithin12Hours(sess);
-                      return (
-                        <div key={type} className="who-section">
-                          <div className="who-lbl" style={{color:TYPE_COLOR[type]}}>{type} ({group.length})</div>
-                          <div className="who-chips">
-                            {group.map((s,i) => (
-                              <div key={i} className="chip">
-                                <span className="chip-num">{i+1}.</span>
-                                {s.name}
-                                {locked
-                                  ? <span className="chip-locked" title="Cancellations locked within 12 hours">🔒</span>
-                                  : <button className="chip-del" onClick={() => removeSignup(s.name, sess)} title="Remove yourself">✕</button>
-                                }
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <CancellationPolicy />
+                  <WhosList session={sess} />
                   {isWithin12Hours(sess) && (
                     <div className="cancel-note">
-                      🔒 Cancellations are locked within 12 hours of the session. To cancel please message the hosts in the <a href={WHATSAPP_GROUP} target="_blank" rel="noreferrer">WhatsApp group</a>.
+                      🔒 Cancellations are locked within 12 hours. To cancel please message the hosts in the <a href={WHATSAPP_GROUP} target="_blank" rel="noreferrer">WhatsApp group</a>.
                     </div>
                   )}
                 </>
@@ -585,17 +564,17 @@ export default function App() {
                     {typeOptions.map(opt => (
                       <button key={opt.key}
                         className={`tbtn${form.type===opt.key?' sel':''}${opt.full?' dis':''}`}
-                        style={opt.waitlist ? {borderColor: form.type===opt.key ? '#f87171' : '#334155', background: form.type===opt.key ? '#f8717111' : undefined} : undefined}
+                        style={opt.waitlist ? {borderColor:form.type===opt.key?'#f87171':'#334155',background:form.type===opt.key?'#f8717111':undefined} : undefined}
                         onClick={() => !opt.full && setForm(p => ({...p,type:opt.key}))}>
                         <div>
-                          <div className="tbtn-name" style={opt.waitlist ? {color:'#f87171'} : undefined}>
+                          <div className="tbtn-name" style={opt.waitlist?{color:'#f87171'}:undefined}>
                             {opt.waitlist ? '📋 Join Waitlist' : opt.key}
                             {opt.full && <span style={{fontSize:11,color:'#ef4444',marginLeft:8}}>FULL</span>}
                           </div>
                           {opt.waitlist && <div style={{fontSize:11,color:'#64748b',marginTop:2}}>Only payable if a spot becomes available</div>}
                         </div>
                         <div style={{textAlign:'right',flexShrink:0}}>
-                          <div className="tbtn-price" style={{color:'#f87171'}}>{sess.prices.games} AED</div>
+                          <div className="tbtn-price" style={opt.waitlist?{color:'#f87171'}:undefined}>{opt.price} AED</div>
                           {opt.waitlist && <div style={{fontSize:10,color:'#64748b',marginTop:1}}>if confirmed</div>}
                         </div>
                       </button>
@@ -605,55 +584,25 @@ export default function App() {
                     {loading ? 'Signing up…' : 'SIGN ME UP →'}
                   </button>
                   {error && <div className="err">⚠️ {error}</div>}
-
-                  {/* Who's joining shown before submitting too */}
                   {signups.length > 0 && (
                     <>
-                    <div style={{margin:'18px 16px 0',background:'#1e293b',border:'1.5px solid #334155',borderRadius:10,padding:'12px 14px',fontSize:12,color:'#94a3b8',lineHeight:1.6}}>
-                      <strong style={{color:'#f1f5f9',display:'block',marginBottom:4}}>Cancellation Policy</strong>
-                      You may remove your name if you can no longer join. Cancelling less than 12 hours before the game please message the hosts directly. Cancelling in the last 2 hours means you must still pay for your spot. Please do not remove other players' names.
-                    </div>
-                    <div className="who">
-                      <div className="who-title">Who's Joining · {signups.filter(s => !isWaitlist(s.type)).length} players {waitlistCount > 0 ? `· ${waitlistCount} on waitlist` : ''}</div>
-                      {['Training + Games','Training Only','Games Only','Waitlist'].map(type => {
-                        const group = signups.filter(s => s.type === type);
-                        if (!group.length) return null;
-                        const locked = isWithin12Hours(sess);
-                        return (
-                          <div key={type} className="who-section">
-                            <div className="who-lbl" style={{color:TYPE_COLOR[type]}}>{type} ({group.length})</div>
-                            <div className="who-chips">
-                              {group.map((s,i) => (
-                                <div key={i} className="chip">
-                                  <span className="chip-num">{i+1}.</span>
-                                  {s.name}
-                                  {locked
-                                    ? <span className="chip-locked" title="Locked within 12 hours">🔒</span>
-                                    : <button className="chip-del" onClick={() => removeSignup(s.name, sess, true)} title="Remove your name">✕</button>
-                                  }
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                      <CancellationPolicy />
+                      <WhosList session={sess} />
                     </>
                   )}
                 </div>
               )}
-
               <a href={WHATSAPP_GROUP} target="_blank" rel="noreferrer" className="wa-banner" style={{marginBottom:24}}>
                 <span className="wa-icon">💬</span>
                 <div className="wa-text"><strong>Not in our WhatsApp group?</strong>Join to stay updated on upcoming sessions</div>
                 <span className="wa-arrow">→</span>
               </a>
             </>
-          )}
+          ) : null}
         </div>
       )}
 
-      {/* ══════════════════════ ADMIN TAB ══════════════════════ */}
+      {/* ══ ADMIN ══ */}
       {view === 'admin' && (
         !adminUnlocked ? (
           <div className="lock-wrap">
@@ -668,13 +617,11 @@ export default function App() {
           </div>
         ) : (
           <>
-            {/* Admin sub-tabs */}
             <div className="admin-tabs">
               <button className={`atb${adminView==='setup'?' on':''}`} onClick={() => setAdminView('setup')}>⚙️ Setup</button>
               <button className={`atb${adminView==='list'?' on':''}`} onClick={() => setAdminView('list')}>📋 List</button>
             </div>
 
-            {/* ── Setup ── */}
             {adminView === 'setup' && (
               <div className="aw">
                 {sessions.length > 0 && (
@@ -762,16 +709,15 @@ export default function App() {
               </div>
             )}
 
-            {/* ── List ── */}
             {adminView === 'list' && (
-              !listSession ? (
+              !listSessionId ? (
                 <div className="lw">
                   <div style={{fontFamily:"'Syne',sans-serif",fontSize:11,fontWeight:800,letterSpacing:3,textTransform:'uppercase',color:'#475569',marginBottom:12}}>
                     View signups for…
                   </div>
                   {sessions.length === 0 && <div style={{color:'#475569',fontSize:13}}>No open sessions.</div>}
                   {sessions.map(s => (
-                    <button key={s.id} className={`list-sess-btn${listSession?.id===s.id?' sel':''}`} onClick={() => setListSession(s)}>
+                    <button key={s.id} className={`list-sess-btn${listSessionId===s.id?' sel':''}`} onClick={() => setListSessionId(s.id)}>
                       <div className="list-sess-name">{s.title}</div>
                       <div className="list-sess-date">{formatDisplayDate(s.date)} · {s.location}</div>
                     </button>
@@ -781,17 +727,16 @@ export default function App() {
                 <div className="lw">
                   <div className="lh">
                     <div>
-                      <div className="lt">{formatShortDate(listSession.date)} · {signups.length} signed up</div>
-                      <div style={{fontSize:12,color:'#475569',marginTop:2,cursor:'pointer'}} onClick={() => setListSession(null)}>← Change session</div>
+                      <div className="lt">{formatShortDate(listSession?.date)} · {signups.filter(s => !isWaitlist(s.type)).length} signed up</div>
+                      <div style={{fontSize:12,color:'#475569',marginTop:2,cursor:'pointer'}} onClick={() => setListSessionId(null)}>← Change session</div>
                     </div>
                     <button className="exp-btn" onClick={() => {
                       const rows = ['Name,Level,Type,Amount (AED),Paid', ...signups.map(s => `${s.name},${s.level},${s.type},${s.amount},${s.paid}`)];
                       const blob = new Blob([rows.join('\n')], {type:'text/csv'});
                       const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-                      a.download = `signups-${listSession.date}.csv`; a.click();
+                      a.download = `signups-${listSession?.date}.csv`; a.click();
                     }}>⬇ Export CSV</button>
                   </div>
-
                   {['Training + Games','Training Only','Games Only','Waitlist'].map(type => {
                     const group = signups.filter(s => s.type === type);
                     if (!group.length) return null;
@@ -811,9 +756,7 @@ export default function App() {
                       </div>
                     );
                   })}
-
                   {signups.length === 0 && <div style={{textAlign:'center',color:'#334155',padding:'40px 0',fontSize:14}}>No signups yet.</div>}
-
                   {signups.length > 0 && (
                     <div className="total-bar">
                       <span style={{fontSize:13,color:'#64748b'}}>Expected total</span>
@@ -823,8 +766,7 @@ export default function App() {
                     </div>
                   )}
                 </div>
-              )
-            )}
+            ))}
           </>
         )
       )}
