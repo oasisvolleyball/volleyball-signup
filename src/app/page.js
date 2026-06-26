@@ -552,7 +552,7 @@ export default function App() {
                     <input className="inp" placeholder="Enter your name…" value={form.name}
                       onChange={e => { setForm(p => ({...p,name:e.target.value})); setError(''); setShowSuggs(true); }}
                       onFocus={() => setShowSuggs(true)}
-                      onBlur={() => setTimeout(() => setShowSuggs(false), 150)}
+                      onBlur={() => setTimeout(() => setShowSuggs(false), 300)}
                       autoComplete="off" />
                     {suggestions.length > 0 && (
                       <div className="suggs">
