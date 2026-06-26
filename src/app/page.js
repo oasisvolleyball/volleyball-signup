@@ -78,7 +78,7 @@ export default function App() {
   const [adminPassword, setAdminPassword] = useState('');
   const PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'volleyball2025';
 
-  useEffect(() => {
+  const loadData = useCallback(() => {
     fetch('/api/signup')
       .then(r => r.json())
       .then(d => {
@@ -101,6 +101,10 @@ export default function App() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const activeDate = (view === 'admin' ? listSession?.date : selectedSession?.date) || null;
 
@@ -153,8 +157,7 @@ export default function App() {
         body: JSON.stringify({ action: 'publish_session', session: draft }),
       });
       if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed'); }
-      const reload = await fetch('/api/signup').then(r => r.json());
-      setSessions(reload.sessions || []);
+      await loadData();
       setDraft({ ...EMPTY_SESSION, id: genId() });
       setEditingId(null);
       alert('Session published!');
@@ -173,8 +176,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'close_session', sessionId }),
       });
-      const reload = await fetch('/api/signup').then(r => r.json());
-      setSessions(reload.sessions || []);
+      await loadData();
       if (selectedSession?.id === sessionId) setSelectedSession(null);
       if (listSession?.id === sessionId) setListSession(null);
     } catch (e) { alert('Failed to close session.'); }
