@@ -119,7 +119,8 @@ export default function App() {
     return () => clearInterval(interval);
   }, [fetchSignups]);
 
-  const sess = selectedSession;
+  // Always derive sess from live sessions array so price updates are reflected immediately
+  const sess = selectedSession ? (sessions.find(s => s.id === selectedSession.id) || selectedSession) : null;
   const trainingCount = signups.filter(s => (s.type === 'Training Only' || s.type === 'Training + Games') && !isWaitlist(s.type)).length;
   const gamesCount = signups.filter(s => (s.type === 'Games Only' || s.type === 'Training + Games') && !isWaitlist(s.type)).length;
   const waitlistCount = signups.filter(s => isWaitlist(s.type)).length;
