@@ -66,6 +66,7 @@ export default function App() {
   const [draft, setDraft] = useState({ ...EMPTY_SESSION, id: genId() });
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ name: '', type: '' });
+  const [showSuggs, setShowSuggs] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -230,7 +231,7 @@ export default function App() {
     } catch (e) {}
   };
 
-  const suggestions = form.name.trim().length > 1
+  const suggestions = (showSuggs && form.name.trim().length > 1)
     ? players.filter(p =>
         p.name.toLowerCase().startsWith(form.name.trim().toLowerCase()) &&
         !signups.find(s => s.name.toLowerCase() === p.name.toLowerCase())
@@ -310,7 +311,7 @@ export default function App() {
     .fa { padding:20px 16px; }
     .fl-lbl { font-size:11px; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:1px; margin-bottom:7px; display:block; }
     .name-wrap { position:relative; margin-bottom:18px; }
-    .suggs { position:absolute; top:calc(100% + 4px); left:0; right:0; background:#1e293b; border:1.5px solid #334155; border-radius:10px; z-index:10; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.3); }
+    .suggs { position:absolute; top:calc(100% + 4px); left:0; right:0; background:#1e293b; border:1.5px solid #334155; border-radius:10px; z-index:100; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.3); }
     .sugg { padding:10px 14px; cursor:pointer; font-size:13px; font-weight:600; color:#f1f5f9; transition:background 0.15s; }
     .sugg:hover { background:#334155; }
     .type-btns { display:flex; flex-direction:column; gap:10px; margin-bottom:18px; }
@@ -549,12 +550,14 @@ export default function App() {
                   <label className="fl-lbl">Your Name</label>
                   <div className="name-wrap">
                     <input className="inp" placeholder="Enter your name…" value={form.name}
-                      onChange={e => { setForm(p => ({...p,name:e.target.value})); setError(''); }}
+                      onChange={e => { setForm(p => ({...p,name:e.target.value})); setError(''); setShowSuggs(true); }}
+                      onFocus={() => setShowSuggs(true)}
+                      onBlur={() => setTimeout(() => setShowSuggs(false), 150)}
                       autoComplete="off" />
                     {suggestions.length > 0 && (
                       <div className="suggs">
                         {suggestions.map(p => (
-                          <div key={p.name} className="sugg" onClick={() => setForm(f => ({...f,name:p.name}))}>{p.name}</div>
+                          <div key={p.name} className="sugg" onClick={() => { setForm(f => ({...f,name:p.name})); setShowSuggs(false); }}>{p.name}</div>
                         ))}
                       </div>
                     )}
