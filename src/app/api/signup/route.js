@@ -129,9 +129,52 @@ export async function POST(request) {
       const sessions = await loadSessions(sheets);
       const { session } = body;
       const existing = sessions.findIndex(s => s.id === session.id);
+      const oldSession = existing >= 0 ? sessions[existing] : null;
       if (existing >= 0) sessions[existing] = session;
       else sessions.push(session);
       await saveSessions(sheets, sessions);
+
+      // If max games increased, promote waitlisted players to fill new spots
+      const oldMax = oldSession ? (oldSession.maxGames || 0) : 0;
+      const newMax = session.maxGames || 0;
+      if (newMax > oldMax && session.date) {
+        const formattedDate = formatDate(session.date);
+        const sessRes = await sheets.spreadsheets.values.get({
+          spreadsheetId: SPREADSHEET_ID,
+          range: 'Sessions!A:I',
+        });
+        const rows = sessRes.data.values || [];
+        const sessionRows = rows.slice(3).filter(r => r[1] === formattedDate && r[4] && r[4].trim());
+
+        // Count current confirmed games players
+        const confirmedCount = sessionRows.filter(r =>
+          r[5] === 'Games Only' || r[5] === 'Training + Games'
+        ).length;
+
+        // How many new spots opened up
+        const newSpots = newMax - oldMax;
+        let spotsToFill = Math.min(newSpots, newMax - confirmedCount);
+
+        // Get waitlisted players in order
+        const waitlistRows = sessionRows.filter(r => r[5] === 'Waitlist');
+
+        for (let i = 0; i < Math.min(spotsToFill, waitlistRows.length); i++) {
+          const wRow = waitlistRows[i];
+          const wRowIndex = rows.findIndex(r => r[1] === formattedDate && r[4] === wRow[4] && r[5] === 'Waitlist');
+          if (wRowIndex >= 0) {
+            const amount = session.prices?.games || wRow[2] || 0;
+            await sheets.spreadsheets.values.update({
+              spreadsheetId: SPREADSHEET_ID,
+              range: `Sessions!A${wRowIndex + 1}:I${wRowIndex + 1}`,
+              valueInputOption: 'USER_ENTERED',
+              requestBody: {
+                values: [[wRow[0], wRow[1], amount, 'No', wRow[4], 'Games Only', wRow[6], wRow[7], wRow[8] || '']],
+              },
+            });
+          }
+        }
+      }
+
       return NextResponse.json({ success: true });
     }
 
