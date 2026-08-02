@@ -23,7 +23,6 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const date = searchParams.get('date');
     if (!date) return NextResponse.json({ signups: [] });
-
     const formattedDate = formatDate(date);
 
     const auth = getAuth();
@@ -31,13 +30,11 @@ export async function GET(request) {
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Sessions!A:H',
+      range: 'Sessions!A:I',
     });
 
     const rows = response.data.values || [];
-    // Columns: A=#, B=Date, C=Amount, D=Paid, E=Name, F=Type, G=Rating, H=Level
-    // Skip first 3 header rows
-    // Only include rows where Date matches AND Name is non-empty and not '—'
+    // Columns: A=#, B=Date, C=Amount, D=Paid, E=Name, F=Type, G=Rating, H=Level, I=Signed Up At
     const signups = rows
       .slice(3)
       .filter(r => {
@@ -52,6 +49,7 @@ export async function GET(request) {
         amount: parseFloat(r[2]) || 0,
         rating: r[6] || '',
         level: r[7] || '',
+        signedUpAt: r[8] || '',
       }));
 
     return NextResponse.json({ signups });
