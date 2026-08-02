@@ -753,6 +753,7 @@ export default function App() {
                             <span className="lr-level">{s.level}</span>
                             <span className="lr-badge" style={{background:TYPE_COLOR[type]+'22',color:TYPE_COLOR[type]}}>{s.amount} AED</span>
                             <span className="lr-paid" style={{color:s.paid==='Yes'?'#34d399':'#ef4444'}}>{s.paid==='Yes'?'✓':'✗'}</span>
+                            {s.signedUpAt && <span style={{fontSize:10,color:'#334155',flexShrink:0}}>{s.signedUpAt}</span>}
                             <button className="lr-del" onClick={() => removeSignup(s.name, listSession)} title="Remove">✕</button>
                           </div>
                         ))}
