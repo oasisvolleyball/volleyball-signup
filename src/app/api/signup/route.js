@@ -14,9 +14,15 @@ function getAuth() {
 }
 
 function formatDate(dateStr) {
-  // Converts 2026-06-13 -> "13 Jun 2026"
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function nowTimestamp() {
+  return new Date().toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
+  });
 }
 
 async function getSheetsClient() {
@@ -28,27 +34,22 @@ async function loadSessions(sheets) {
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: 'Config!A1:B10',
+      range: 'Config!A1:B20',
     });
     const rows = res.data.values || [];
     const sessionsRow = rows.find(r => r[0] === 'sessions');
     if (sessionsRow && sessionsRow[1] && sessionsRow[1].trim()) {
       return JSON.parse(sessionsRow[1]);
     }
-    // Fallback: try old single-session format
     const sessionRow = rows.find(r => r[0] === 'session');
     if (sessionRow && sessionRow[1] && sessionRow[1].trim()) {
-      const s = JSON.parse(sessionRow[1]);
-      return [s];
+      return [JSON.parse(sessionRow[1])];
     }
     return [];
-  } catch (e) {
-    return [];
-  }
+  } catch (e) { return []; }
 }
 
 async function saveSessions(sheets, sessions) {
-  // Find the row index of 'sessions' key
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
     range: 'Config!A1:B20',
@@ -63,7 +64,6 @@ async function saveSessions(sheets, sessions) {
       requestBody: { values: [[JSON.stringify(sessions)]] },
     });
   } else {
-    // Append new row
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Config!A:B',
@@ -79,7 +79,6 @@ async function findNextEmptySessionRow(sheets) {
     range: 'Sessions!B1:B2000',
   });
   const rows = res.data.values || [];
-  // Skip first 3 header rows, find first row where B is empty or '—'
   for (let i = 3; i < rows.length; i++) {
     const val = rows[i] ? (rows[i][0] || '').trim() : '';
     if (!val || val === '—') return i + 1;
@@ -104,7 +103,6 @@ export async function GET() {
   try {
     const sheets = await getSheetsClient();
 
-    // Load players
     const playersRes = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: 'Players!B3:E500',
@@ -112,15 +110,9 @@ export async function GET() {
     const playerRows = playersRes.data.values || [];
     const players = playerRows
       .filter(r => r[0] && r[0].trim() && r[0] !== 'Name')
-      .map(r => ({
-        name: r[0].trim(),
-        rating: r[2] || '',
-        level: r[3] || '',
-      }));
+      .map(r => ({ name: r[0].trim(), rating: r[2] || '', level: r[3] || '' }));
 
-    // Load sessions
     const sessions = await loadSessions(sheets);
-
     return NextResponse.json({ players, sessions });
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -132,76 +124,79 @@ export async function POST(request) {
     const body = await request.json();
     const sheets = await getSheetsClient();
 
-    // ── Publish / update a session ──
+    // ── Publish session ──
     if (body.action === 'publish_session') {
       const sessions = await loadSessions(sheets);
       const { session } = body;
       const existing = sessions.findIndex(s => s.id === session.id);
-      if (existing >= 0) {
-        sessions[existing] = session;
-      } else {
-        sessions.push(session);
-      }
+      if (existing >= 0) sessions[existing] = session;
+      else sessions.push(session);
       await saveSessions(sheets, sessions);
       return NextResponse.json({ success: true });
     }
 
-    // ── Close / delete a session ──
+    // ── Close session ──
     if (body.action === 'close_session') {
       const sessions = await loadSessions(sheets);
-      const updated = sessions.filter(s => s.id !== body.sessionId);
-      await saveSessions(sheets, updated);
+      await saveSessions(sheets, sessions.filter(s => s.id !== body.sessionId));
       return NextResponse.json({ success: true });
     }
 
-    // ── Remove a signup, log cancellation, auto-promote waitlist ──
+    // ── Remove signup ──
     if (body.action === 'remove_signup') {
       const { date, name, sessionTitle } = body;
       const formattedDate = formatDate(date);
-      const now = new Date().toLocaleString('en-GB', { 
-        day: '2-digit', month: 'short', year: 'numeric',
-        hour: '2-digit', minute: '2-digit', hour12: true 
-      });
+      const timestamp = nowTimestamp();
 
       const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: 'Sessions!A:H',
+        range: 'Sessions!A:I',
       });
       const rows = res.data.values || [];
 
-      // Find the cancelled row to get their type
+      // Find and get details of the cancelled row
       const rowIndex = rows.findIndex(r => r[1] === formattedDate && r[4] === name);
       const cancelledType = rowIndex >= 0 ? (rows[rowIndex][5] || '') : '';
+      const cancelledAmount = rowIndex >= 0 ? (rows[rowIndex][2] || '0') : '0';
 
       // Clear the cancelled row
       if (rowIndex >= 0) {
         await sheets.spreadsheets.values.update({
           spreadsheetId: SPREADSHEET_ID,
-          range: `Sessions!A${rowIndex + 1}:H${rowIndex + 1}`,
+          range: `Sessions!A${rowIndex + 1}:I${rowIndex + 1}`,
           valueInputOption: 'RAW',
-          requestBody: { values: [['', '', '', '', '', '', '', '']] },
+          requestBody: { values: [['', '', '', '', '', '', '', '', '']] },
         });
       }
 
-      // Find first waitlisted person for this session
-      const waitlistRow = rows.find((r, i) =>
-        i !== rowIndex &&
-        r[1] === formattedDate &&
-        r[4] && r[4].trim() &&
-        r[5] === 'Waitlist'
-      );
-
+      // Only promote from waitlist if the cancelled player was in the MAIN list
+      // (Games Only or Training + Games) — NOT if they were already on the Waitlist
+      const isMainListCancellation = cancelledType === 'Games Only' || cancelledType === 'Training + Games';
       let promoted = null;
-      if (waitlistRow) {
-        const waitlistRowIndex = rows.indexOf(waitlistRow);
-        const amount = waitlistRow[2] || 0;
-        await sheets.spreadsheets.values.update({
-          spreadsheetId: SPREADSHEET_ID,
-          range: `Sessions!A${waitlistRowIndex + 1}:H${waitlistRowIndex + 1}`,
-          valueInputOption: 'USER_ENTERED',
-          requestBody: { values: [[waitlistRow[0], waitlistRow[1], amount, 'No', waitlistRow[4], 'Games Only', waitlistRow[6], waitlistRow[7]]] },
-        });
-        promoted = waitlistRow[4];
+
+      if (isMainListCancellation) {
+        const waitlistRow = rows.find((r, i) =>
+          i !== rowIndex &&
+          r[1] === formattedDate &&
+          r[4] && r[4].trim() &&
+          r[5] === 'Waitlist'
+        );
+        if (waitlistRow) {
+          const waitlistRowIndex = rows.indexOf(waitlistRow);
+          await sheets.spreadsheets.values.update({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `Sessions!A${waitlistRowIndex + 1}:I${waitlistRowIndex + 1}`,
+            valueInputOption: 'USER_ENTERED',
+            requestBody: {
+              values: [[
+                waitlistRow[0], waitlistRow[1], cancelledAmount, 'No',
+                waitlistRow[4], 'Games Only', waitlistRow[6], waitlistRow[7],
+                waitlistRow[8] || '', // keep original signup timestamp
+              ]],
+            },
+          });
+          promoted = waitlistRow[4];
+        }
       }
 
       // Log to Cancellations sheet
@@ -212,11 +207,10 @@ export async function POST(request) {
           range: 'Cancellations!A:F',
           valueInputOption: 'USER_ENTERED',
           requestBody: {
-            values: [[now, name, formattedDate, sessionTitle || '', cancelledType, promoted || '']],
+            values: [[timestamp, name, formattedDate, sessionTitle || '', cancelledType, promoted || '']],
           },
         });
       } catch (e) {
-        // Don't fail if Cancellations sheet doesn't exist yet
         console.error('Cancellations log error:', e.message);
       }
 
@@ -227,6 +221,7 @@ export async function POST(request) {
     if (body.action === 'signup' || (!body.action && body.name)) {
       const { date, name, type, amount, isNewPlayer } = body;
       const formattedDate = formatDate(date);
+      const timestamp = nowTimestamp();
 
       // Look up player rating and level
       const playersRes = await sheets.spreadsheets.values.get({
@@ -240,20 +235,18 @@ export async function POST(request) {
       const rating = playerMatch ? (playerMatch[2] || '') : '';
       const level = playerMatch ? (playerMatch[3] || '') : '';
 
-      // Find next empty row in Sessions
       const nextRow = await findNextEmptySessionRow(sheets);
 
-      // Write signup: A=#blank, B=Date, C=Amount, D=Paid, E=Name, F=Type, G=Rating, H=Level
+      // Sheet columns: A=#, B=Date, C=Amount, D=Paid, E=Name, F=Type, G=Rating, H=Level, I=Signed Up At
       await sheets.spreadsheets.values.update({
         spreadsheetId: SPREADSHEET_ID,
-        range: `Sessions!A${nextRow}:H${nextRow}`,
+        range: `Sessions!A${nextRow}:I${nextRow}`,
         valueInputOption: 'USER_ENTERED',
         requestBody: {
-          values: [['', formattedDate, amount, 'No', name, type, rating, level]],
+          values: [['', formattedDate, amount, 'No', name, type, rating, level, timestamp]],
         },
       });
 
-      // Add new player to Players sheet if needed
       if (isNewPlayer) {
         const nextPlayerRow = await findNextEmptyPlayerRow(sheets);
         await sheets.spreadsheets.values.update({
