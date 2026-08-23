@@ -76,14 +76,20 @@ async function saveSessions(sheets, sessions) {
 async function findNextEmptySessionRow(sheets) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'Sessions!B1:B2000',
+    range: 'Sessions!A:E',
   });
   const rows = res.data.values || [];
+  // Find the last row that has actual data (name in col E, date in col B)
+  // then return the row after it — always append at the true bottom
+  let lastDataRow = 3; // minimum: after 3 header rows
   for (let i = 3; i < rows.length; i++) {
-    const val = rows[i] ? (rows[i][0] || '').trim() : '';
-    if (!val || val === '—') return i + 1;
+    const date = rows[i] ? (rows[i][1] || '').trim() : '';
+    const name = rows[i] ? (rows[i][4] || '').trim() : '';
+    if (date && name && name !== '—') {
+      lastDataRow = i + 1; // 1-indexed row number of this data row
+    }
   }
-  return rows.length + 1;
+  return lastDataRow + 1; // one row after the last real entry
 }
 
 async function findNextEmptyPlayerRow(sheets) {
