@@ -46,8 +46,8 @@ function safeUrl(url) {
 }
 
 const EMPTY_SESSION = {
-  id:'', title:'Volleyball Social Games', date:'', time:'7:00 PM – 10:00 PM',
-  location:'ADNEC, Abu Dhabi', mapUrl:'', hosts:'Keri',
+  id:'', title:'Volleyball Social Games', date:'', time:'8:00 PM – 10:00 PM',
+  location:'ICS Khalidiya', mapUrl:'https://maps.app.goo.gl/ICSKhalidiya', hosts:'Keri',
   maxGames:18, maxTraining:0, notes:'', offerTraining:false, offerBoth:false,
   prices:{ games:35, training:0, both:0 },
 };
@@ -954,11 +954,10 @@ export default function App() {
           <>
             {/* Admin sub-tabs */}
             <div className="admin-tabs">
-              <button className={`atb${adminView==='setup'?' on':''}`} onClick={() => setAdminView('setup')}>⚙ Setup</button>
-              <button className={`atb${adminView==='gamenight'?' on':''}`} onClick={() => setAdminView('gamenight')}>🎮 Game Night</button>
+              <button className={`atb${adminView==='setup'?' on':''}`} onClick={() => setAdminView('setup')}>⚙️ Setup</button>
+              <button className={`atb${adminView==='gamenight'?' on':''}`} onClick={() => setAdminView('gamenight')}>🎮 On the Night</button>
               <button className={`atb${adminView==='teams'?' on':''}`} onClick={() => setAdminView('teams')}>👥 Teams</button>
-              <button className={`atb${adminView==='list'?' on':''}`} onClick={() => setAdminView('list')}>📋 List</button>
-              <button className={`atb${adminView==='history'?' on':''}`} onClick={() => { setAdminView('history'); loadHistory(); }}>📅 History</button>
+              <button className={`atb${adminView==='history'?' on':''}`} onClick={() => { setAdminView('history'); setTimeout(loadHistory, 100); }}>📅 History</button>
             </div>
 
             {/* ── SETUP ── */}
