@@ -14,106 +14,130 @@ function getAuth() {
 }
 
 function formatDate(dateStr) {
+  if (!dateStr) return '';
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function parseSheetDate(dateStr) {
+  // Parse "08 Jun 2025", "8 Jun 2025", "2025-06-08" etc
+  if (!dateStr) return null;
+  const s = dateStr.trim().replace('Sept','Sep');
+  // Try ISO first
+  let d = new Date(s);
+  if (!isNaN(d)) return d;
+  // Try "DD Mon YYYY"
+  const parts = s.split(' ');
+  if (parts.length === 3) {
+    d = new Date(`${parts[1]} ${parts[0].padStart(2,'0')} ${parts[2]}`);
+    if (!isNaN(d)) return d;
+  }
+  return null;
 }
 
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const date = searchParams.get('date');
-    const searchName = searchParams.get('name');
-    const searchPaid = searchParams.get('paid');
-    const searchAttended = searchParams.get('attended');
-    const dateFrom = searchParams.get('from');
-    const dateTo = searchParams.get('to');
-    const limit = parseInt(searchParams.get('limit') || '500');
+    const date       = searchParams.get('date');
+    const searchName = searchParams.get('name') || '';
+    const searchPaid = searchParams.get('paid') || '';
+    const searchAtt  = searchParams.get('attended') || '';
+    const dateFrom   = searchParams.get('from') || '';
+    const dateTo     = searchParams.get('to') || '';
+    const limit      = parseInt(searchParams.get('limit') || '1000');
 
     const auth = getAuth();
     const sheets = google.sheets({ version: 'v4', auth });
 
-    // Load from both Sessions and any Archive sheets
+    // Load Sessions + all Archive_ sheets
     const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
-    const sheetNames = spreadsheet.data.sheets.map(s => s.properties.title);
-    const sessionSheets = ['Sessions', ...sheetNames.filter(n => n.startsWith('Archive_'))];
+    const sheetNames  = spreadsheet.data.sheets.map(s => s.properties.title);
+    const toScan = ['Sessions', ...sheetNames.filter(n => n.startsWith('Archive_'))];
 
     let allSignups = [];
 
-    for (const sheetName of sessionSheets) {
-      const response = await sheets.spreadsheets.values.get({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `'${sheetName}'!A:K`,
-      });
-      const rows = response.data.values || [];
-      const signups = rows.slice(3).filter(r => {
-        const rowDate = (r[1] || '').trim();
+    for (const sheetName of toScan) {
+      let res;
+      try {
+        res = await sheets.spreadsheets.values.get({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `'${sheetName}'!A:K`,
+        });
+      } catch { continue; }
+
+      const rows = res.data.values || [];
+      // Data starts at row 3 (index 2) — rows 0,1 are title+note, row 2 is header
+      const dataRows = rows.slice(2);
+
+      for (const r of dataRows) {
+        const rowDate = (r[1] || '').trim().replace('Sept','Sep');
         const rowName = (r[4] || '').trim();
-        if (!rowDate || !rowName || rowName === '—') return false;
+
+        // Skip empty / header rows
+        if (!rowDate || !rowName || rowName === '—' || rowName === 'Name') continue;
+        // Skip header row that might have slipped in
+        if (rowDate === 'Date' || rowDate === 'Date\n(AED)') continue;
 
         // Filter by specific date
         if (date) {
           const formatted = formatDate(date);
-          if (rowDate !== formatted) return false;
+          if (rowDate !== formatted) continue;
         }
 
         // Filter by date range
         if (dateFrom || dateTo) {
-          try {
-            const rowD = new Date(rowDate);
-            if (dateFrom && rowD < new Date(dateFrom)) return false;
-            if (dateTo && rowD > new Date(dateTo)) return false;
-          } catch {}
+          const rowD = parseSheetDate(rowDate);
+          if (!rowD) continue;
+          if (dateFrom && rowD < new Date(dateFrom + 'T00:00:00')) continue;
+          if (dateTo   && rowD > new Date(dateTo   + 'T23:59:59')) continue;
         }
 
-        // Filter by player name
-        if (searchName && !rowName.toLowerCase().includes(searchName.toLowerCase())) return false;
-
-        // Filter by paid status
-        if (searchPaid && (r[3] || '').trim() !== searchPaid) return false;
-
+        // Filter by name
+        if (searchName && !rowName.toLowerCase().includes(searchName.toLowerCase())) continue;
+        // Filter by paid
+        if (searchPaid && (r[3] || '').trim() !== searchPaid) continue;
         // Filter by attended
-        if (searchAttended && (r[8] || '').trim() !== searchAttended) return false;
+        if (searchAtt  && (r[8] || '').trim() !== searchAtt) continue;
 
-        return true;
-      }).map(r => ({
-        date: r[1] || '',
-        amount: parseFloat(r[2]) || 0,
-        paid: r[3] || 'No',
-        name: r[4] || '',
-        type: r[5] || '',
-        rating: r[6] || '',
-        status: r[7] || '',
-        attended: r[8] || 'Yes',
-        host: r[9] || 'No',
-        signedUpAt: r[10] || '',
-        source: sheetName,
-      }));
-
-      allSignups = [...allSignups, ...signups];
+        allSignups.push({
+          date:       rowDate,
+          amount:     parseFloat(r[2]) || 0,
+          paid:       (r[3] || 'No').trim(),
+          name:       rowName,
+          type:       (r[5] || '').trim(),
+          rating:     (r[6] || '').trim(),
+          status:     (r[7] || '').trim(),
+          attended:   (r[8] || 'Yes').trim(),
+          host:       (r[9] || 'No').trim(),
+          signedUpAt: (r[10] || '').trim(),
+          source:     sheetName,
+        });
+      }
     }
 
-    // Sort by date desc, then name
+    // Sort: newest date first, then name
     allSignups.sort((a, b) => {
-      const da = new Date(a.date); const db = new Date(b.date);
+      const da = parseSheetDate(a.date) || new Date(0);
+      const db = parseSheetDate(b.date) || new Date(0);
       return db - da || a.name.localeCompare(b.name);
     });
 
-    // Load friend requests for the date if searching by date
+    // Load friend requests for specific date
     let friendRequests = [];
     if (date) {
       try {
-        const configRes = await sheets.spreadsheets.values.get({
-          spreadsheetId: SPREADSHEET_ID, range: 'Config!A1:B30',
+        const cfgRes = await sheets.spreadsheets.values.get({
+          spreadsheetId: SPREADSHEET_ID, range: 'Config!A1:B50',
         });
-        const configRows = configRes.data.values || [];
-        const frRow = configRows.find(r => r[0] === `fr_${date}`);
+        const cfgRows = cfgRes.data.values || [];
+        const frRow = cfgRows.find(r => r[0] === `fr_${date}`);
         if (frRow?.[1]) friendRequests = JSON.parse(frRow[1]);
       } catch {}
     }
 
     return NextResponse.json({
       signups: allSignups.slice(0, limit),
-      total: allSignups.length,
+      total:   allSignups.length,
       friendRequests,
     });
   } catch (err) {
