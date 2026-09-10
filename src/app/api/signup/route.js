@@ -122,7 +122,9 @@ export async function GET() {
             if (!(row[4] || '').trim() || row[4].trim() === '—') continue;
             if ((row[9] || '').trim() === 'Yes') continue; // host
             if ((row[5] || '').trim() === 'Waitlist') continue;
-            if ((row[3] || '').trim() === 'No') {
+            // Only bump players who are fully unpaid (not Cash — they've confirmed to pay on the night)
+            const paidVal = (row[3] || '').trim();
+            if (paidVal === 'No') {
               await s.spreadsheets.values.update({
                 spreadsheetId: SHEET, range: `Sessions!F${i + 1}`,
                 valueInputOption: 'RAW', requestBody: { values: [['Waitlist']] },
@@ -323,9 +325,10 @@ export async function POST(req) {
         const attended  = field === 'attended' ? value : (row[8] || 'Yes').trim();
         const paid      = field === 'paid'     ? value : (row[3] || 'No').trim();
         let status = 'Pending';
-        if (isHost)           status = 'Host';
-        else if (attended === 'No') status = 'No-Show';
-        else if (paid === 'Yes')    status = 'Confirmed';
+        if (isHost)                          status = 'Host';
+        else if (attended === 'No')          status = 'No-Show';
+        else if (paid === 'Yes')             status = 'Confirmed';
+        else if (paid === 'Cash')            status = 'Cash - collect';
         await s.spreadsheets.values.update({
           spreadsheetId: SHEET, range: `Sessions!H${ri + 1}`,
           valueInputOption: 'RAW', requestBody: { values: [[status]] },
