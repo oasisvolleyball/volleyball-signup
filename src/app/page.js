@@ -1083,10 +1083,48 @@ export default function App() {
                     {/* Copy buttons */}
                     <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
                       <button className="copy-btn" onClick={()=>{
-                        const main=gnList.filter(s=>s.type!=='Waitlist'&&s.host!=='Yes');
-                        const txt=main.map((s,i)=>`${i+1}. ${s.name}`).join('\n');
-                        navigator.clipboard.writeText(`${gnSess.title} — ${gnSess.date}\n\n${txt}`);
-                        alert('Player list copied!');
+                        const main=gnList.filter(s=>s.type!=='Waitlist');
+                        const wait=gnList.filter(s=>s.type==='Waitlist');
+                        const max=gnSess.maxGames||18;
+                        const price=gnSess.prices?.games||35;
+                        const mapUrl=gnSess.mapUrl||'';
+                        const appUrl='https://volleyball-signup.vercel.app/';
+                        // Format date as "Monday, 14 September"
+                        const d=new Date(gnSess.date+'T00:00:00');
+                        const dateStr=d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'});
+                        // Time — simplify "8:00 PM – 10:00 PM" to "8-10pm"
+                        const timeStr=(gnSess.time||'').replace(/\s*(PM|AM)/gi,m=>m.trim().toLowerCase()).replace(':00','').replace(' – ','-').replace(' - ','-');
+                        // Player rows — fill empty spots with "."
+                        const playerLines=[];
+                        for(let i=0;i<max;i++){
+                          const p=main[i];
+                          playerLines.push((i+1)+'. '+(p?p.name:'.'));
+                        }
+                        // Waitlist rows
+                        const waitLines=wait.length>0
+                          ? wait.map((p,i)=>(i+1)+'. '+p.name)
+                          : ['1. ','2. ','3. '];
+                        const txt=[
+                          dateStr+' '+timeStr,
+                          gnSess.location,
+                          '',
+                          '*'+price+' AED each*',
+                          '',
+                          'Hosts: '+gnSess.hosts,
+                          '',
+                          ...playerLines,
+                          '',
+                          'Waitlist:',
+                          ...waitLines,
+                          '',
+                          'Location:',
+                          mapUrl||'',
+                          '',
+                          'Sign up here:',
+                          appUrl,
+                        ].join('\n');
+                        navigator.clipboard.writeText(txt);
+                        alert('List copied!');
                       }}>📋 Copy player list</button>
                       <button className="copy-btn" onClick={()=>{
                         const unpaid=gnList.filter(s=>s.paid==='No'&&s.type!=='Waitlist'&&s.host!=='Yes');
