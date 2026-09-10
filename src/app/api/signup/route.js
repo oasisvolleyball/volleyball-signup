@@ -312,9 +312,23 @@ export async function POST(req) {
       const rows = sr.data.values || [];
       const ri = rows.findIndex(r => r[1]?.trim() === fd && r[4]?.trim() === name);
       if (ri >= 0) {
+        // Update the field
         await s.spreadsheets.values.update({
           spreadsheetId: SHEET, range: `Sessions!${col}${ri + 1}`,
           valueInputOption: 'RAW', requestBody: { values: [[value]] },
+        });
+        // Recalculate and write Status (col H) based on current + new values
+        const row = rows[ri];
+        const isHost    = (row[9] || '').trim() === 'Yes';
+        const attended  = field === 'attended' ? value : (row[8] || 'Yes').trim();
+        const paid      = field === 'paid'     ? value : (row[3] || 'No').trim();
+        let status = 'Pending';
+        if (isHost)           status = 'Host';
+        else if (attended === 'No') status = 'No-Show';
+        else if (paid === 'Yes')    status = 'Confirmed';
+        await s.spreadsheets.values.update({
+          spreadsheetId: SHEET, range: `Sessions!H${ri + 1}`,
+          valueInputOption: 'RAW', requestBody: { values: [[status]] },
         });
       }
       return NextResponse.json({ success: true });
@@ -333,6 +347,28 @@ export async function POST(req) {
         await s.spreadsheets.values.update({
           spreadsheetId: SHEET, range: `Players!${col}${ri + 1}`,
           valueInputOption: 'RAW', requestBody: { values: [[value]] },
+        });
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    // ── mark as host ─────────────────────────────────────────
+    if (body.action === 'mark_host') {
+      const { date, name, isHost } = body;
+      const fd = toSheetDate(date);
+      const sr = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
+      const rows = sr.data.values || [];
+      const ri = rows.findIndex(r => r[1]?.trim() === fd && r[4]?.trim() === name);
+      if (ri >= 0) {
+        // Host=Yes/No, Paid=Yes/No, Amount=0 if host, Status
+        const amount  = isHost ? 0 : (parseFloat(rows[ri][2]) || 0);
+        const paid    = isHost ? 'Yes' : 'No';
+        const status  = isHost ? 'Host' : 'Pending';
+        const hostVal = isHost ? 'Yes' : 'No';
+        await s.spreadsheets.values.update({
+          spreadsheetId: SHEET, range: `Sessions!C${ri+1}:J${ri+1}`,
+          valueInputOption: 'RAW',
+          requestBody: { values: [[amount, paid, rows[ri][4], rows[ri][5], rows[ri][6], status, rows[ri][8], hostVal]] },
         });
       }
       return NextResponse.json({ success: true });
