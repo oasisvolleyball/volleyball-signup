@@ -96,11 +96,11 @@ export async function GET(request) {
       }
     }
 
-    // Sort newest first
+    // Sort by date descending only — preserve signup order within each session
     results.sort((a, b) => {
       const da = parseSheetDate(a.date) || new Date(0);
       const db = parseSheetDate(b.date) || new Date(0);
-      return db - da || a.name.localeCompare(b.name);
+      return db - da;
     });
 
     // Friend requests for specific date
