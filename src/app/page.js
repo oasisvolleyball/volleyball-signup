@@ -341,7 +341,7 @@ export default function App() {
       Promise.all(loaded.map(s=>
         s.date
           ? fetch(`/api/session?date=${encodeURIComponent(s.date)}`).then(r=>r.json())
-              .then(data=>({id:s.id, count:(data.signups||[]).filter(p=>p.type!=='Waitlist'&&p.host!=='Yes').length}))
+              .then(data=>({id:s.id, count:(data.signups||[]).filter(p=>p.type!=='Waitlist').length}))
               .catch(()=>({id:s.id,count:0}))
           : Promise.resolve({id:s.id,count:0})
       )).then(res=>{
@@ -369,7 +369,7 @@ export default function App() {
   },[fetchSignups]);
 
   // ── Spots ────────────────────────────────────────────────────
-  const confirmed  = signups.filter(s=>s.type!=='Waitlist'&&s.host!=='Yes');
+  const confirmed  = signups.filter(s=>s.type!=='Waitlist');
   const waitlisted = signups.filter(s=>s.type==='Waitlist');
   const gamesLeft  = sess ? Math.max(0, sess.maxGames-confirmed.filter(s=>s.type!=='Training Only').length) : 0;
   const trainLeft  = sess ? Math.max(0,(sess.maxTraining||0)-confirmed.filter(s=>s.type==='Training Only'||s.type==='Training + Games').length) : 0;
