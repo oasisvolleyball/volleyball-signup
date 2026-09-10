@@ -220,6 +220,7 @@ textarea.inp{resize:vertical;}
 .tog-btn{font-size:11px;font-weight:700;padding:5px 10px;border-radius:20px;border:1.5px solid;background:none;white-space:nowrap;transition:all .2s;flex-shrink:0;}
 .tog-btn.yes{color:#16a34a;border-color:#bbf7d0;background:#f0fdf4;}
 .tog-btn.no{color:#dc2626;border-color:#fecaca;background:#fef2f2;}
+.tog-btn.cash{color:#d97706;border-color:#fde68a;background:#fffbeb;}
 .gn-expand{padding:12px 14px;border-top:1px solid #f1f5f9;background:#f8fafc;}
 .rate-row{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
 .rate-row:last-child{margin-bottom:0;}
@@ -496,8 +497,8 @@ export default function App() {
     const res=await fetch(`/api/session?date=${encodeURIComponent(s.date)}`);
     const d=await res.json();
     setTmFriends(d.friendRequests||[]);
-    // Hosts play too — include them, just exclude waitlist and training only
-    const eligible=(d.signups||[]).filter(p=>p.type!=='Waitlist'&&p.type!=='Training Only'&&(p.paid==='Yes'||p.host==='Yes'));
+    // Include paid, cash, and hosts — exclude waitlist and training only
+    const eligible=(d.signups||[]).filter(p=>p.type!=='Waitlist'&&p.type!=='Training Only'&&(p.paid==='Yes'||p.paid==='Cash'||p.host==='Yes'));
     const enriched=eligible.map(p=>{
       const pl=players.find(pp=>pp.name.toLowerCase()===p.name.toLowerCase());
       return{...p,rating:pl?.rating||p.rating||'',setter:pl?.setter==='Setter',attack:pl?.attack||'',receive:pl?.receive||'',gender:pl?.gender||''};
@@ -1137,10 +1138,13 @@ export default function App() {
                       }}>📋 Copy player list</button>
                       <button className="copy-btn" onClick={()=>{
                         const unpaid=gnList.filter(s=>s.paid==='No'&&s.type!=='Waitlist'&&s.host!=='Yes');
-                        if(!unpaid.length){alert('Everyone has paid! ✓');return;}
-                        const txt=unpaid.map((s,i)=>`${i+1}. ${s.name}`).join('\n');
-                        navigator.clipboard.writeText(`Unpaid players:\n\n${txt}`);
-                        alert('Unpaid list copied!');
+                        const cash=gnList.filter(s=>s.paid==='Cash'&&s.type!=='Waitlist'&&s.host!=='Yes');
+                        if(!unpaid.length&&!cash.length){alert('Everyone has paid! ✓');return;}
+                        const lines=[];
+                        if(cash.length){lines.push('💵 Collect cash on the night:');cash.forEach((s,i)=>lines.push((i+1)+'. '+s.name));lines.push('');}
+                        if(unpaid.length){lines.push('✗ Not yet paid:');unpaid.forEach((s,i)=>lines.push((i+1)+'. '+s.name));}
+                        navigator.clipboard.writeText(lines.join('\n'));
+                        alert('Copied!');
                       }}>💸 Copy unpaid</button>
                     </div>
 
@@ -1162,9 +1166,12 @@ export default function App() {
                                     <div className="gn-name">{s.name}</div>
                                     <div className="gn-sub">R:{pl?.rating||'—'} · {LEVEL_MAP[pl?.rating]||'Unrated'}{pl?.setter==='Setter'?' · Setter':''}</div>
                                   </div>
-                                  <button className={`tog-btn ${s.paid==='Yes'?'yes':'no'}`}
-                                    onClick={()=>gnToggle(s.name,'paid',s.paid==='Yes'?'No':'Yes')}>
-                                    {gnBusy[`${s.name}_paid`]?'…':s.paid==='Yes'?'✓ Paid':'✗ Unpaid'}
+                                  <button className={`tog-btn ${s.paid==='Yes'?'yes':s.paid==='Cash'?'cash':'no'}`}
+                                    onClick={()=>{
+                                      const next = s.paid==='No'?'Cash':s.paid==='Cash'?'Yes':'No';
+                                      gnToggle(s.name,'paid',next);
+                                    }}>
+                                    {gnBusy[`${s.name}_paid`]?'…':s.paid==='Yes'?'✓ Paid':s.paid==='Cash'?'💵 Cash':'✗ Unpaid'}
                                   </button>
                                   <button className={`tog-btn ${s.attended==='Yes'?'yes':'no'}`}
                                     onClick={()=>gnToggle(s.name,'attended',s.attended==='Yes'?'No':'Yes')}>
@@ -1373,13 +1380,13 @@ export default function App() {
                               <div className="gn-name">{s.name}</div>
                               <div className="gn-sub">{s.type} · {s.amount} AED · R:{pl?.rating||s.rating||'—'}</div>
                             </div>
-                            <button className={`tog-btn ${s.paid==='Yes'?'yes':'no'}`}
+                            <button className={`tog-btn ${s.paid==='Yes'?'yes':s.paid==='Cash'?'cash':'no'}`}
                               onClick={async()=>{
-                                const v=s.paid==='Yes'?'No':'Yes';
+                                const v=s.paid==='No'?'Cash':s.paid==='Cash'?'Yes':'No';
                                 await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'update_signup',date:histSel,name:s.name,field:'paid',value:v})});
                                 setHistRows(prev=>prev.map(r=>r.name===s.name&&r.type===s.type?{...r,paid:v}:r));
                               }}>
-                              {s.paid==='Yes'?'✓ Paid':'✗ Unpaid'}
+                              {s.paid==='Yes'?'✓ Paid':s.paid==='Cash'?'💵 Cash':'✗ Unpaid'}
                             </button>
                             <button className={`tog-btn ${s.attended==='Yes'?'yes':'no'}`}
                               onClick={async()=>{
