@@ -477,6 +477,19 @@ export default function App() {
     setGnBusy(p=>{const n={...p};delete n[key];return n;});
   };
 
+  // ── Mark host ────────────────────────────────────────────────
+  const markHost = async (name, isHost) => {
+    setGnBusy(p => ({...p, [`${name}_host`]: true}));
+    setGnList(prev => prev.map(s => s.name === name
+      ? {...s, host: isHost ? 'Yes' : 'No', paid: isHost ? 'Yes' : s.paid, amount: isHost ? 0 : s.amount}
+      : s));
+    await fetch('/api/signup', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: 'mark_host', date: gnSess.date, name, isHost}),
+    });
+    setGnBusy(p => { const n={...p}; delete n[`${name}_host`]; return n; });
+  };
+
   // ── Teams ────────────────────────────────────────────────────
   const loadTm=useCallback(async(s)=>{
     if(!s) return;
@@ -662,6 +675,22 @@ export default function App() {
             </button>
           </div>
         </div>
+        {!histDate && (
+          <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f1f5f9'}}>
+            <button
+              onClick={()=>markHost(s.name, s.host!=='Yes')}
+              style={{
+                width:'100%', padding:'9px', borderRadius:10, border:'1.5px solid',
+                fontSize:13, fontWeight:700, cursor:'pointer', transition:'all .2s',
+                borderColor: s.host==='Yes' ? '#bbf7d0' : '#e2e8f0',
+                background:  s.host==='Yes' ? '#f0fdf4'  : '#fff',
+                color:       s.host==='Yes' ? '#16a34a'  : '#64748b',
+              }}>
+              {gnBusy[`${s.name}_host`] ? '…' : s.host==='Yes' ? '✓ Host (tap to remove)' : 'Mark as Host'}
+            </button>
+            {s.host==='Yes' && <div style={{fontSize:11,color:'#94a3b8',textAlign:'center',marginTop:4}}>Host — no payment required</div>}
+          </div>
+        )}
       </div>
     );
   };
