@@ -496,7 +496,8 @@ export default function App() {
     const res=await fetch(`/api/session?date=${encodeURIComponent(s.date)}`);
     const d=await res.json();
     setTmFriends(d.friendRequests||[]);
-    const eligible=(d.signups||[]).filter(p=>p.type!=='Waitlist'&&p.type!=='Training Only'&&p.paid==='Yes'&&p.host!=='Yes');
+    // Hosts play too — include them, just exclude waitlist and training only
+    const eligible=(d.signups||[]).filter(p=>p.type!=='Waitlist'&&p.type!=='Training Only'&&(p.paid==='Yes'||p.host==='Yes'));
     const enriched=eligible.map(p=>{
       const pl=players.find(pp=>pp.name.toLowerCase()===p.name.toLowerCase());
       return{...p,rating:pl?.rating||p.rating||'',setter:pl?.setter==='Setter',attack:pl?.attack||'',receive:pl?.receive||'',gender:pl?.gender||''};
