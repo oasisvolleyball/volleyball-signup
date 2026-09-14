@@ -607,7 +607,48 @@ export async function POST(req) {
 
     // version check
     if (body.action === 'version') {
-      return NextResponse.json({ version: '14-SEP-2026-v3' });
+      return NextResponse.json({ version: '14-SEP-2026-v4' });
+    }
+
+    // ── promote first waitlist player for a date ─────────────
+    if (body.action === 'promote_waitlist') {
+      const { date } = body;
+      const fd = toSheetDate(date);
+      const sr = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
+      const rows = sr.data.values || [];
+      // Find ALL rows for this date and their types
+      const dateRows = rows.map((r,i) => ({
+        i, sheetRow: i+1,
+        date: (r[1]||'').trim().replace('Sept','Sep'),
+        name: (r[4]||'').trim(),
+        type: (r[5]||'').trim(),
+        paid: (r[3]||'').trim(),
+      })).filter(r => r.date === fd && r.name && r.name !== '—');
+
+      const waitlist = dateRows.filter(r => r.type === 'Waitlist');
+      const main = dateRows.filter(r => r.type !== 'Waitlist');
+
+      if (waitlist.length === 0) {
+        return NextResponse.json({ success: false, error: 'No waitlist players', dateRows });
+      }
+
+      const first = waitlist[0];
+      await s.spreadsheets.values.update({
+        spreadsheetId: SHEET, range: `Sessions!F${first.sheetRow}`,
+        valueInputOption: 'RAW', requestBody: { values: [['Games Only']] },
+      });
+      if (first.paid === 'No') {
+        await s.spreadsheets.values.update({
+          spreadsheetId: SHEET, range: `Sessions!C${first.sheetRow}`,
+          valueInputOption: 'RAW', requestBody: { values: [[35]] },
+        });
+      }
+      const newStatus = first.paid==='Yes'?'Confirmed':first.paid==='Cash'?'Cash - collect':'Pending';
+      await s.spreadsheets.values.update({
+        spreadsheetId: SHEET, range: `Sessions!H${first.sheetRow}`,
+        valueInputOption: 'RAW', requestBody: { values: [[newStatus]] },
+      });
+      return NextResponse.json({ success: true, promoted: first.name, sheetRow: first.sheetRow, allRows: dateRows });
     }
 
     return NextResponse.json({ error: 'unknown action' }, { status: 400 });
