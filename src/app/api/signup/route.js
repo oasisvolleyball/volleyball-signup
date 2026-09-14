@@ -377,6 +377,50 @@ export async function POST(req) {
       return NextResponse.json({ success: true });
     }
 
+    // ── bump to waitlist (10h rule) ──────────────────────────
+    if (body.action === 'bump_to_waitlist') {
+      const { date, name, title } = body;
+      const fd = toSheetDate(date);
+      const ts = nowTs();
+
+      const sr = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
+      const rows = sr.data.values || [];
+      const ri = rows.findIndex(r => r[1]?.trim() === fd && r[4]?.trim() === name);
+
+      if (ri >= 0) {
+        const oldType = (rows[ri][5] || '').trim();
+        // Move player to waitlist
+        await s.spreadsheets.values.update({
+          spreadsheetId: SHEET, range: `Sessions!D${ri+1}:H${ri+1}`,
+          valueInputOption: 'RAW',
+          requestBody: { values: [['No', name, 'Waitlist', rows[ri][6], 'Pending']] },
+        });
+
+        // Promote first waitlist player if this was a main list player
+        if (oldType === 'Games Only' || oldType === 'Training + Games') {
+          const wl = rows.find((r, i) => i !== ri && r[1]?.trim() === fd && r[4]?.trim() && r[5] === 'Waitlist');
+          if (wl) {
+            const wi = rows.indexOf(wl);
+            await s.spreadsheets.values.update({
+              spreadsheetId: SHEET, range: `Sessions!F${wi+1}:H${wi+1}`,
+              valueInputOption: 'RAW',
+              requestBody: { values: [['Games Only', wl[6], 'Pending']] },
+            });
+          }
+        }
+
+        // Log to cancellations
+        try {
+          await s.spreadsheets.values.append({
+            spreadsheetId: SHEET, range: 'Cancellations!A:G',
+            valueInputOption: 'USER_ENTERED',
+            requestBody: { values: [[ts, name, fd, title||'', oldType, '', 'Yes']] },
+          });
+        } catch {}
+      }
+      return NextResponse.json({ success: true });
+    }
+
     // ── save teams ───────────────────────────────────────────
     if (body.action === 'save_teams') {
       const { date, teams } = body;
