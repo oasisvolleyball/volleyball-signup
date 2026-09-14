@@ -610,45 +610,55 @@ export async function POST(req) {
       return NextResponse.json({ version: '14-SEP-2026-v4' });
     }
 
-    // ── promote first waitlist player for a date ─────────────
+    // ── promote waitlist player (first or specific name) ────────
     if (body.action === 'promote_waitlist') {
-      const { date } = body;
+      const { date, name } = body; // name is optional — if provided, promote that specific player
       const fd = toSheetDate(date);
       const sr = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
       const rows = sr.data.values || [];
-      // Find ALL rows for this date and their types
-      const dateRows = rows.map((r,i) => ({
-        i, sheetRow: i+1,
-        date: (r[1]||'').trim().replace('Sept','Sep'),
-        name: (r[4]||'').trim(),
-        type: (r[5]||'').trim(),
-        paid: (r[3]||'').trim(),
-      })).filter(r => r.date === fd && r.name && r.name !== '—');
 
-      const waitlist = dateRows.filter(r => r.type === 'Waitlist');
-      const main = dateRows.filter(r => r.type !== 'Waitlist');
-
-      if (waitlist.length === 0) {
-        return NextResponse.json({ success: false, error: 'No waitlist players', dateRows });
+      // Find the target player
+      let target = null;
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        const rDate = (r[1]||'').trim().replace('Sept','Sep');
+        const rName = (r[4]||'').trim();
+        const rType = (r[5]||'').trim();
+        if (rDate !== fd) continue;
+        if (!rName || rName === '—') continue;
+        if (rType !== 'Waitlist') continue;
+        // If specific name requested, match it; otherwise take first waitlist player
+        if (name && rName !== name) continue;
+        target = { sheetRow: i+1, name: rName, paid: (r[3]||'No').trim(), amount: parseFloat(r[2]||0) };
+        break;
       }
 
-      const first = waitlist[0];
+      if (!target) {
+        return NextResponse.json({ success: false, error: `No waitlist player found${name?' named '+name:''}` });
+      }
+
+      // Promote: set type to Games Only
       await s.spreadsheets.values.update({
-        spreadsheetId: SHEET, range: `Sessions!F${first.sheetRow}`,
+        spreadsheetId: SHEET, range: `Sessions!F${target.sheetRow}`,
         valueInputOption: 'RAW', requestBody: { values: [['Games Only']] },
       });
-      if (first.paid === 'No') {
+
+      // Set amount to 35 if it was 0 and player hasn't paid
+      if (target.amount === 0 && target.paid === 'No') {
         await s.spreadsheets.values.update({
-          spreadsheetId: SHEET, range: `Sessions!C${first.sheetRow}`,
+          spreadsheetId: SHEET, range: `Sessions!C${target.sheetRow}`,
           valueInputOption: 'RAW', requestBody: { values: [[35]] },
         });
       }
-      const newStatus = first.paid==='Yes'?'Confirmed':first.paid==='Cash'?'Cash - collect':'Pending';
+
+      // Update status
+      const newStatus = target.paid==='Yes'?'Confirmed':target.paid==='Cash'?'Cash - collect':'Pending';
       await s.spreadsheets.values.update({
-        spreadsheetId: SHEET, range: `Sessions!H${first.sheetRow}`,
+        spreadsheetId: SHEET, range: `Sessions!H${target.sheetRow}`,
         valueInputOption: 'RAW', requestBody: { values: [[newStatus]] },
       });
-      return NextResponse.json({ success: true, promoted: first.name, sheetRow: first.sheetRow, allRows: dateRows });
+
+      return NextResponse.json({ success: true, promoted: target.name });
     }
 
     return NextResponse.json({ error: 'unknown action' }, { status: 400 });
