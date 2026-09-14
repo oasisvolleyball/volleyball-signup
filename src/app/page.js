@@ -1368,8 +1368,7 @@ export default function App() {
                             t.players.forEach((p,i)=>lines.push(`${i+1}. ${p.name}${p.setter?' ⭐':''}`));
                             lines.push('');
                           }
-                          navigator.clipboard.writeText(lines.join('
-'));
+                          navigator.clipboard.writeText(lines.join('\n'));
                           alert('Teams copied!');
                         }}>
                           📋 Copy Teams for WhatsApp
