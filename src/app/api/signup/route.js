@@ -300,19 +300,17 @@ export async function POST(req) {
           if ((r[1]||'').trim() !== fd) continue;
           if (!(r[4]||'').trim() || (r[4]||'').trim() === '—') continue;
           if ((r[5]||'').trim() !== 'Waitlist') continue;
-          // Found first waitlist player — promote them
+          // Promote — preserve their existing paid status (Cash stays Cash)
           const wlSheetRow = i + 1;
           await s.spreadsheets.values.update({
-            spreadsheetId: SHEET,
-            range: `Sessions!F${wlSheetRow}`,
-            valueInputOption: 'RAW',
-            requestBody: { values: [['Games Only']] },
+            spreadsheetId: SHEET, range: `Sessions!F${wlSheetRow}`,
+            valueInputOption: 'RAW', requestBody: { values: [['Games Only']] },
           });
+          const paidVal = (r[3]||'No').trim();
+          const newStatus = paidVal==='Yes' ? 'Confirmed' : paidVal==='Cash' ? 'Cash - collect' : 'Pending';
           await s.spreadsheets.values.update({
-            spreadsheetId: SHEET,
-            range: `Sessions!H${wlSheetRow}`,
-            valueInputOption: 'RAW',
-            requestBody: { values: [['Pending']] },
+            spreadsheetId: SHEET, range: `Sessions!H${wlSheetRow}`,
+            valueInputOption: 'RAW', requestBody: { values: [[newStatus]] },
           });
           promoted = (r[4]||'').trim();
           break;
@@ -411,39 +409,54 @@ export async function POST(req) {
       const fd = toSheetDate(date);
       const ts = nowTs();
 
-      // Read sheet
       const sr = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
       const rows = sr.data.values || [];
 
-      // Find player
-      let playerSheetRow = -1;
+      // Find player row
+      let playerIdx = -1;
       let oldType = '';
+      let playerRow = null;
       for (let i = 0; i < rows.length; i++) {
         if ((rows[i][1]||'').trim() === fd && (rows[i][4]||'').trim() === name) {
-          playerSheetRow = i + 1;
+          playerIdx = i;
           oldType = (rows[i][5]||'').trim();
+          playerRow = rows[i];
           break;
         }
       }
-      if (playerSheetRow < 0) return NextResponse.json({ success: true });
+      if (playerIdx < 0) return NextResponse.json({ success: true });
 
       const isMain = oldType === 'Games Only' || oldType === 'Training + Games';
 
-      // Move player to Waitlist — update Paid, Type, Status only (leave name etc intact)
+      // Step 1: Clear the player's original row
       await s.spreadsheets.values.update({
-        spreadsheetId: SHEET, range: `Sessions!D${playerSheetRow}`,
-        valueInputOption: 'RAW', requestBody: { values: [['No']] },
-      });
-      await s.spreadsheets.values.update({
-        spreadsheetId: SHEET, range: `Sessions!F${playerSheetRow}`,
-        valueInputOption: 'RAW', requestBody: { values: [['Waitlist']] },
-      });
-      await s.spreadsheets.values.update({
-        spreadsheetId: SHEET, range: `Sessions!H${playerSheetRow}`,
-        valueInputOption: 'RAW', requestBody: { values: [['Pending']] },
+        spreadsheetId: SHEET,
+        range: `Sessions!A${playerIdx + 1}:K${playerIdx + 1}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [['','','','','','','','','','','']] },
       });
 
-      // Re-read sheet then promote first OTHER waitlist player
+      // Step 2: Append player as Waitlist at the bottom
+      // Amount=0, Paid=No, Name, Type=Waitlist, Rating, Status=Pending, Attended=Yes, Host=No, SignedAt=original
+      await s.spreadsheets.values.append({
+        spreadsheetId: SHEET, range: 'Sessions!A:K',
+        valueInputOption: 'RAW',
+        requestBody: { values: [[
+          '',
+          fd,
+          '0',
+          'No',
+          name,
+          'Waitlist',
+          playerRow[6]||'',
+          'Pending',
+          'Yes',
+          'No',
+          playerRow[10]||''
+        ]] },
+      });
+
+      // Step 3: Re-read and promote first waitlist player (not the one we just moved)
       let promoted = null;
       if (isMain) {
         const sr2 = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
@@ -453,16 +466,18 @@ export async function POST(req) {
           if ((r[1]||'').trim() !== fd) continue;
           if (!(r[4]||'').trim() || (r[4]||'').trim() === '—') continue;
           if ((r[5]||'').trim() !== 'Waitlist') continue;
-          if ((r[4]||'').trim() === name) continue; // skip the bumped player
-          // Promote this player
-          const wlSheetRow = i + 1;
+          if ((r[4]||'').trim() === name) continue; // skip bumped player
+          // Promote — keep their existing paid status (could be Cash)
+          const wlRow = i + 1;
           await s.spreadsheets.values.update({
-            spreadsheetId: SHEET, range: `Sessions!F${wlSheetRow}`,
+            spreadsheetId: SHEET, range: `Sessions!F${wlRow}`,
             valueInputOption: 'RAW', requestBody: { values: [['Games Only']] },
           });
           await s.spreadsheets.values.update({
-            spreadsheetId: SHEET, range: `Sessions!H${wlSheetRow}`,
-            valueInputOption: 'RAW', requestBody: { values: [['Pending']] },
+            spreadsheetId: SHEET, range: `Sessions!H${wlRow}`,
+            valueInputOption: 'RAW',
+            // Status depends on their paid value
+            requestBody: { values: [[(r[3]||'No').trim() === 'No' ? 'Pending' : 'Confirmed']] },
           });
           promoted = (r[4]||'').trim();
           break;
