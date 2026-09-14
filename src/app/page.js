@@ -528,6 +528,20 @@ export default function App() {
     if (d.promoted) alert(`✓ ${name} removed. ${d.promoted} promoted from waitlist.`);
   };
 
+  // ── Promote waitlist player (admin manual) ─────────────────
+  const promotePlayer = async (name) => {
+    setGnBusy(p => ({...p, [`${name}_promote`]: true}));
+    const res = await fetch('/api/signup', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: 'promote_waitlist', date: gnSess.date, name}),
+    });
+    const d = await res.json();
+    await loadGn(gnSess);
+    setGnBusy(p => { const n={...p}; delete n[`${name}_promote`]; return n; });
+    if (d.success) alert(`✓ ${name} promoted to main list!`);
+    else alert('Failed: ' + (d.error || 'unknown error'));
+  };
+
   // ── Teams ────────────────────────────────────────────────────
   const loadTm=useCallback(async(s)=>{
     if(!s) return;
@@ -1208,18 +1222,25 @@ export default function App() {
                                     <div className="gn-name">{s.name}</div>
                                     <div className="gn-sub">R:{pl?.rating||'—'} · {LEVEL_MAP[pl?.rating]||'Unrated'}{pl?.setter==='Setter'?' · Setter':''}</div>
                                   </div>
-                                  <button className={`tog-btn ${s.paid==='Yes'?'yes':s.paid==='Cash'?'cash':'no'}`}
-                                    onClick={()=>{
-                                      const next = s.paid==='No'?'Cash':s.paid==='Cash'?'Yes':'No';
-                                      gnToggle(s.name,'paid',next);
-                                    }}>
-                                    {gnBusy[`${s.name}_paid`]?'…':s.paid==='Yes'?'✓ Paid':s.paid==='Cash'?'💵 Cash':'✗ Unpaid'}
-                                  </button>
-                                  <button className={`tog-btn ${s.attended==='Yes'?'yes':'no'}`}
-                                    onClick={()=>gnToggle(s.name,'attended',s.attended==='Yes'?'No':'Yes')}>
-                                    {gnBusy[`${s.name}_attended`]?'…':s.attended==='Yes'?'✓ Here':'✗ Absent'}
-                                  </button>
-                                  <button onClick={()=>setGnExp(isOpen?null:s.name)} style={{background:'none',border:'none',color:'#94a3b8',fontSize:14,marginLeft:4,padding:4}}>
+                                  {s.type==='Waitlist'?(
+                                    <button
+                                      onClick={e=>{e.stopPropagation();promotePlayer(s.name);}}
+                                      style={{fontSize:11,fontWeight:700,padding:'5px 10px',borderRadius:20,border:'1.5px solid #bbf7d0',background:'#f0fdf4',color:'#16a34a',whiteSpace:'nowrap',flexShrink:0,cursor:'pointer'}}>
+                                      {gnBusy[`${s.name}_promote`]?'…':'↑ Promote'}
+                                    </button>
+                                  ):(
+                                    <>
+                                      <button className={`tog-btn ${s.paid==='Yes'?'yes':s.paid==='Cash'?'cash':'no'}`}
+                                        onClick={e=>{e.stopPropagation();const next=s.paid==='No'?'Cash':s.paid==='Cash'?'Yes':'No';gnToggle(s.name,'paid',next);}}>
+                                        {gnBusy[`${s.name}_paid`]?'…':s.paid==='Yes'?'✓ Paid':s.paid==='Cash'?'💵 Cash':'✗ Unpaid'}
+                                      </button>
+                                      <button className={`tog-btn ${s.attended==='Yes'?'yes':'no'}`}
+                                        onClick={e=>{e.stopPropagation();gnToggle(s.name,'attended',s.attended==='Yes'?'No':'Yes');}}>
+                                        {gnBusy[`${s.name}_attended`]?'…':s.attended==='Yes'?'✓ Here':'✗ Absent'}
+                                      </button>
+                                    </>
+                                  )}
+                                  <button onClick={e=>{e.stopPropagation();setGnExp(isOpen?null:s.name);}} style={{background:'none',border:'none',color:'#94a3b8',fontSize:14,marginLeft:4,padding:4}}>
                                     {isOpen?'▲':'▼'}
                                   </button>
                                 </div>
