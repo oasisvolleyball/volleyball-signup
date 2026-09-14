@@ -1,6 +1,8 @@
 import { google } from 'googleapis';
 import { NextResponse } from 'next/server';
 
+// VERSION: 14-SEP-2026-v3
+
 const SHEET = process.env.SPREADSHEET_ID;
 
 function getSheets() {
@@ -264,21 +266,39 @@ export async function POST(req) {
       const fd = toSheetDate(date);
       const ts = nowTs();
 
-      // Read full sessions sheet
+      // Read full sheet
       const sr = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
       const rows = sr.data.values || [];
 
-      // Find the player row — sheet row = array index + 1 (1-indexed)
+      // Find player — search every row, log all date values to debug
       let playerSheetRow = -1;
       let ctype = '';
       for (let i = 0; i < rows.length; i++) {
-        if ((rows[i][1]||'').trim() === fd && (rows[i][4]||'').trim() === name) {
-          playerSheetRow = i + 1; // 1-indexed sheet row
+        const rowDate = (rows[i][1]||'').trim();
+        const rowName = (rows[i][4]||'').trim();
+        if (rowName === name && rowDate === fd) {
+          playerSheetRow = i + 1;
           ctype = (rows[i][5]||'').trim();
           break;
         }
       }
-      if (playerSheetRow < 0) return NextResponse.json({ success: true, promoted: null });
+
+      // If not found with exact date match, try partial match (handles Sept vs Sep)
+      if (playerSheetRow < 0) {
+        for (let i = 0; i < rows.length; i++) {
+          const rowDate = (rows[i][1]||'').trim().replace('Sept','Sep');
+          const rowName = (rows[i][4]||'').trim();
+          if (rowName === name && rowDate === fd) {
+            playerSheetRow = i + 1;
+            ctype = (rows[i][5]||'').trim();
+            break;
+          }
+        }
+      }
+
+      if (playerSheetRow < 0) {
+        return NextResponse.json({ success: false, error: `Player ${name} not found for date ${fd}` });
+      }
 
       const isMain = ctype === 'Games Only' || ctype === 'Training + Games';
 
@@ -290,29 +310,43 @@ export async function POST(req) {
         requestBody: { values: [['','','','','','','','','','','']] },
       });
 
-      // Re-read sheet after clearing to find waitlist accurately
+      // Re-read sheet fresh
+      const sr2 = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
+      const rows2 = sr2.data.values || [];
+
+      // Find first waitlist player for this date
       let promoted = null;
       if (isMain) {
-        const sr2 = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
-        const rows2 = sr2.data.values || [];
         for (let i = 0; i < rows2.length; i++) {
           const r = rows2[i];
-          if ((r[1]||'').trim() !== fd) continue;
-          if (!(r[4]||'').trim() || (r[4]||'').trim() === '—') continue;
-          if ((r[5]||'').trim() !== 'Waitlist') continue;
-          // Promote — preserve their existing paid status (Cash stays Cash)
-          const wlSheetRow = i + 1;
+          const rDate = (r[1]||'').trim().replace('Sept','Sep');
+          const rName = (r[4]||'').trim();
+          const rType = (r[5]||'').trim();
+          if (rDate !== fd) continue;
+          if (!rName || rName === '—') continue;
+          if (rType !== 'Waitlist') continue;
+          // Found — promote them
+          const wlRow = i + 1;
           await s.spreadsheets.values.update({
-            spreadsheetId: SHEET, range: `Sessions!F${wlSheetRow}`,
+            spreadsheetId: SHEET, range: `Sessions!F${wlRow}`,
             valueInputOption: 'RAW', requestBody: { values: [['Games Only']] },
           });
+          // Set amount if it was 0 (waitlist players often have 0)
+          const wlAmount = parseFloat(r[2]||0);
+          if (wlAmount === 0) {
+            await s.spreadsheets.values.update({
+              spreadsheetId: SHEET, range: `Sessions!C${wlRow}`,
+              valueInputOption: 'RAW', requestBody: { values: [[35]] },
+            });
+          }
+          // Update status based on paid value
           const paidVal = (r[3]||'No').trim();
           const newStatus = paidVal==='Yes' ? 'Confirmed' : paidVal==='Cash' ? 'Cash - collect' : 'Pending';
           await s.spreadsheets.values.update({
-            spreadsheetId: SHEET, range: `Sessions!H${wlSheetRow}`,
+            spreadsheetId: SHEET, range: `Sessions!H${wlRow}`,
             valueInputOption: 'RAW', requestBody: { values: [[newStatus]] },
           });
-          promoted = (r[4]||'').trim();
+          promoted = rName;
           break;
         }
       }
@@ -328,6 +362,7 @@ export async function POST(req) {
 
       return NextResponse.json({ success: true, promoted });
     }
+
 
     // ── update paid/attended ─────────────────────────────────
     if (body.action === 'update_signup') {
@@ -568,6 +603,11 @@ export async function POST(req) {
         status: r[7]||'',
       })).filter(r => r.date.trim() === fd || r.date.includes('Sep'));
       return NextResponse.json({ fd, matching });
+    }
+
+    // version check
+    if (body.action === 'version') {
+      return NextResponse.json({ version: '14-SEP-2026-v3' });
     }
 
     return NextResponse.json({ error: 'unknown action' }, { status: 400 });
