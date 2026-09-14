@@ -9,13 +9,26 @@ const BANK_HOLDER = 'Keri Adonna Zeller';
 const BANK_IBAN   = 'AE440860000006133847628';
 const BANK_SWIFT  = 'WIOBAEADXXX';
 const TEAM_COLORS = ['Blue','Black','White','Green','Yellow','Red'];
-const LEVEL_MAP   = {'1':'Pro','2':'Advanced','3':'Intermediate','4':'Upper Beginner','5':'Beginner'};
+const LEVEL_MAP   = {'1':'Pro','2':'Advanced','3':'Upper Intermediate','4':'Intermediate','5':'Lower Intermediate','6':'Beginner'};
 
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 
 function fmtLong(d) {
   if (!d) return '';
   return new Date(d+'T00:00:00').toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+}
+
+function within10h(sess) {
+  if (!sess?.date || !sess?.time) return false;
+  try {
+    const [timePart, meridiem] = sess.time.split('–')[0].trim().split(' ');
+    let [h, m] = timePart.split(':').map(Number);
+    if (meridiem === 'PM' && h !== 12) h += 12;
+    if (meridiem === 'AM' && h === 12) h = 0;
+    const [yr, mo, dy] = sess.date.split('-').map(Number);
+    const diff = new Date(yr, mo-1, dy, h, m||0) - Date.now();
+    return diff >= 0 && diff <= 10*3600*1000;
+  } catch { return false; }
 }
 
 function within24h(sess) {
@@ -463,6 +476,16 @@ export default function App() {
   const gnToggle=async(name,field,val)=>{
     const key=`${name}_${field}`;
     setGnBusy(p=>({...p,[key]:true}));
+    // If marking unpaid within 10h — move to waitlist and promote next waitlist player
+    if (field==='paid' && val==='No' && within10h(gnSess)) {
+      const confirmed = window.confirm(`It's within 10 hours of the session. Moving ${name} to the waitlist and promoting the next waitlist player. Continue?`);
+      if (!confirmed) { setGnBusy(p=>{const n={...p};delete n[key];return n;}); return; }
+      await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'bump_to_waitlist',date:gnSess.date,name,title:gnSess.title})});
+      await loadGn(gnSess);
+      setGnBusy(p=>{const n={...p};delete n[key];return n;});
+      return;
+    }
     setGnList(prev=>prev.map(s=>s.name===name?{...s,[field]:val}:s));
     await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({action:'update_signup',date:gnSess.date,name,field,value:val})});
@@ -489,6 +512,20 @@ export default function App() {
       body: JSON.stringify({action: 'mark_host', date: gnSess.date, name, isHost}),
     });
     setGnBusy(p => { const n={...p}; delete n[`${name}_host`]; return n; });
+  };
+
+  // ── Remove player (admin) ───────────────────────────────────
+  const removePlayer = async (name) => {
+    if (!confirm(`Remove ${name} from the list? This will promote the next waitlist player if applicable.`)) return;
+    setGnBusy(p => ({...p, [`${name}_remove`]: true}));
+    const res = await fetch('/api/signup', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action:'remove', date:gnSess.date, name, title:gnSess.title, late:true}),
+    });
+    const d = await res.json();
+    await loadGn(gnSess);
+    setGnBusy(p => { const n={...p}; delete n[`${name}_remove`]; return n; });
+    if (d.promoted) alert(`✓ ${name} removed. ${d.promoted} promoted from waitlist.`);
   };
 
   // ── Teams ────────────────────────────────────────────────────
@@ -651,7 +688,7 @@ export default function App() {
         <div className="rate-row">
           <span className="rate-lbl">Rating</span>
           <div className="rbtns">
-            {[1,2,3,4,5].map(n=>(
+            {[1,2,3,4,5,6].map(n=>(
               <button key={n} className={`rb${(pl?.rating||s.rating)===String(n)?' on':''}`}
                 onClick={()=>{gnRate(s.name,'rating',String(n));if(histDate) setHistRows(prev=>prev.map(r=>r.name===s.name?{...r,rating:String(n)}:r));}}>
                 {gnBusy[`${s.name}_rating`]?'…':n}
@@ -662,11 +699,11 @@ export default function App() {
         </div>
         <div className="rate-row">
           <span className="rate-lbl">Attack</span>
-          <div className="rbtns">{[1,2,3,4,5].map(n=><button key={n} className={`rb${pl?.attack===String(n)?' on':''}`} onClick={()=>gnRate(s.name,'attack',String(n))}>{n}</button>)}</div>
+          <div className="rbtns">{[1,2,3,4,5,6].map(n=><button key={n} className={`rb${pl?.attack===String(n)?' on':''}`} onClick={()=>gnRate(s.name,'attack',String(n))}>{n}</button>)}</div>
         </div>
         <div className="rate-row">
           <span className="rate-lbl">Receive</span>
-          <div className="rbtns">{[1,2,3,4,5].map(n=><button key={n} className={`rb${pl?.receive===String(n)?' on':''}`} onClick={()=>gnRate(s.name,'receive',String(n))}>{n}</button>)}</div>
+          <div className="rbtns">{[1,2,3,4,5,6].map(n=><button key={n} className={`rb${pl?.receive===String(n)?' on':''}`} onClick={()=>gnRate(s.name,'receive',String(n))}>{n}</button>)}</div>
         </div>
         <div className="rate-row">
           <span className="rate-lbl">Setter</span>
@@ -690,7 +727,12 @@ export default function App() {
               }}>
               {gnBusy[`${s.name}_host`] ? '…' : s.host==='Yes' ? '✓ Host (tap to remove)' : 'Mark as Host'}
             </button>
-            {s.host==='Yes' && <div style={{fontSize:11,color:'#94a3b8',textAlign:'center',marginTop:4}}>Host — no payment required</div>}
+            <button
+              onClick={()=>removePlayer(s.name)}
+              style={{width:'100%',padding:'9px',borderRadius:10,border:'1.5px solid #fecaca',fontSize:13,fontWeight:700,cursor:'pointer',background:'#fef2f2',color:'#dc2626'}}>
+              {gnBusy[`${s.name}_remove`] ? 'Removing…' : '✕ Remove from list'}
+            </button>
+            <div style={{fontSize:11,color:'#94a3b8',textAlign:'center'}}>Removing promotes the next waitlist player</div>
           </div>
         )}
       </div>
@@ -1291,9 +1333,27 @@ export default function App() {
                     )}
 
                     {tmTeams.length>0&&(
-                      <button className="btn-primary" style={{marginTop:10}} onClick={saveTm}>
-                        {tmSaved?'✓ Teams Saved to Sheet':'💾 Confirm & Save Teams'}
-                      </button>
+                      <div style={{display:'flex',flexDirection:'column',gap:8,marginTop:10}}>
+                        <button className="btn-primary" onClick={saveTm}>
+                          {tmSaved?'✓ Teams Saved to Sheet':'💾 Confirm & Save Teams'}
+                        </button>
+                        <button className="copy-btn" style={{width:'100%',padding:'11px',textAlign:'center'}} onClick={()=>{
+                          const d=new Date(tmSess.date+'T00:00:00');
+                          const dateStr=d.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'});
+                          const teamEmoji={Blue:'🔵',Black:'⚫',White:'⚪',Green:'🟢',Yellow:'🟡',Red:'🔴'};
+                          const lines=[`🏐 Teams — ${dateStr}`,''];
+                          for(const t of tmTeams){
+                            lines.push(`${teamEmoji[t.color]||'▪'} ${t.color} Team (avg ${teamAvg(t)})`);
+                            t.players.forEach((p,i)=>lines.push(`${i+1}. ${p.name}${p.setter?' ⭐':''}`));
+                            lines.push('');
+                          }
+                          navigator.clipboard.writeText(lines.join('
+'));
+                          alert('Teams copied!');
+                        }}>
+                          📋 Copy Teams for WhatsApp
+                        </button>
+                      </div>
                     )}
                   </>
                 )}
