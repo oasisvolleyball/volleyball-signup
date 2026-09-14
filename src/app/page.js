@@ -545,17 +545,35 @@ export default function App() {
   // ── Teams ────────────────────────────────────────────────────
   const loadTm=useCallback(async(s)=>{
     if(!s) return;
-    const res=await fetch(`/api/session?date=${encodeURIComponent(s.date)}`);
-    const d=await res.json();
-    setTmFriends(d.friendRequests||[]);
-    // Include paid, cash, and hosts — exclude waitlist and training only
-    const eligible=(d.signups||[]).filter(p=>p.type!=='Waitlist'&&p.type!=='Training Only'&&(p.paid==='Yes'||p.paid==='Cash'||p.host==='Yes'));
-    // Fetch fresh player data to ensure ratings/setter are current
-    let freshPlayers = players;
-    if (!freshPlayers.length) {
-      const pr = await fetch('/api/signup').then(r=>r.json()).catch(()=>({}));
-      freshPlayers = pr.players || [];
+
+    // Fetch fresh player data and session signups in parallel
+    const [sessionRes, playerRes, savedTeamsRes] = await Promise.all([
+      fetch(`/api/session?date=${encodeURIComponent(s.date)}`).then(r=>r.json()).catch(()=>({})),
+      fetch('/api/signup').then(r=>r.json()).catch(()=>({})),
+      fetch('/api/signup', {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'load_teams', date:s.date})}).then(r=>r.json()).catch(()=>({})),
+    ]);
+
+    const freshPlayers = playerRes.players || players;
+    setTmFriends(sessionRes.friendRequests||[]);
+
+    // If saved teams exist for this date, load them
+    if (savedTeamsRes.teams && savedTeamsRes.teams.length > 0) {
+      const enrichedTeams = savedTeamsRes.teams.map(t => ({
+        ...t,
+        players: t.players.map(p => {
+          const pl = freshPlayers.find(pp => pp.name.toLowerCase()===p.name.toLowerCase());
+          return {...p, rating:pl?.rating||p.rating||'', setter:p.setter||pl?.setter==='Setter', attack:pl?.attack||'', receive:pl?.receive||''};
+        })
+      }));
+      setTmTeams(enrichedTeams);
+      setTmPool([]);
+      setTmSaved(true);
+      return;
     }
+
+    // No saved teams — load eligible players into pool
+    const eligible=(sessionRes.signups||[]).filter(p=>p.type!=='Waitlist'&&p.type!=='Training Only'&&(p.paid==='Yes'||p.paid==='Cash'||p.host==='Yes'));
     const enriched=eligible.map(p=>{
       const pl=freshPlayers.find(pp=>pp.name.toLowerCase()===p.name.toLowerCase());
       return{...p,
@@ -1367,8 +1385,13 @@ export default function App() {
 
                     {tmTeams.length>0&&(
                       <div style={{display:'flex',flexDirection:'column',gap:8,marginTop:10}}>
+                        {tmSaved&&(
+                          <button className="btn-outline" onClick={()=>{setTmSaved(false);loadTm(tmSess);}}>
+                            ↺ Re-balance / Edit Teams
+                          </button>
+                        )}
                         <button className="btn-primary" onClick={saveTm}>
-                          {tmSaved?'✓ Teams Saved to Sheet':'💾 Confirm & Save Teams'}
+                          {tmSaved?'✓ Teams Saved — Save Again':'💾 Confirm & Save Teams'}
                         </button>
                         <button className="copy-btn" style={{width:'100%',padding:'11px',textAlign:'center'}} onClick={()=>{
                           const d=new Date(tmSess.date+'T00:00:00');
@@ -1376,7 +1399,7 @@ export default function App() {
                           const teamEmoji={Blue:'🔵',Black:'⚫',White:'⚪',Green:'🟢',Yellow:'🟡',Red:'🔴'};
                           const lines=[`🏐 Teams — ${dateStr}`,''];
                           for(const t of tmTeams){
-                            lines.push(`${teamEmoji[t.color]||'▪'} ${t.color} Team (avg ${teamAvg(t)})`);
+                            lines.push(`${teamEmoji[t.color]||'▪'} ${t.color} Team`);
                             t.players.forEach((p,i)=>lines.push(`${i+1}. ${p.name}${p.setter?' ⭐':''}`));
                             lines.push('');
                           }
