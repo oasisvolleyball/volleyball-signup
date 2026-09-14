@@ -264,30 +264,58 @@ export async function POST(req) {
       const fd = toSheetDate(date);
       const ts = nowTs();
 
+      // Read full sessions sheet
       const sr = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
       const rows = sr.data.values || [];
-      const ri = rows.findIndex(r => r[1]?.trim() === fd && r[4]?.trim() === name);
-      const ctype = ri >= 0 ? (rows[ri][5] || '') : '';
+
+      // Find the player row — sheet row = array index + 1 (1-indexed)
+      let playerSheetRow = -1;
+      let ctype = '';
+      for (let i = 0; i < rows.length; i++) {
+        if ((rows[i][1]||'').trim() === fd && (rows[i][4]||'').trim() === name) {
+          playerSheetRow = i + 1; // 1-indexed sheet row
+          ctype = (rows[i][5]||'').trim();
+          break;
+        }
+      }
+      if (playerSheetRow < 0) return NextResponse.json({ success: true, promoted: null });
+
       const isMain = ctype === 'Games Only' || ctype === 'Training + Games';
 
-      if (ri >= 0) {
-        await s.spreadsheets.values.update({
-          spreadsheetId: SHEET, range: `Sessions!A${ri + 1}:K${ri + 1}`,
-          valueInputOption: 'RAW', requestBody: { values: [['', '', '', '', '', '', '', '', '', '', '']] },
-        });
-      }
+      // Clear the player row
+      await s.spreadsheets.values.update({
+        spreadsheetId: SHEET,
+        range: `Sessions!A${playerSheetRow}:K${playerSheetRow}`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [['','','','','','','','','','','']] },
+      });
 
-      // Auto-promote waitlist
+      // Re-read sheet after clearing to find waitlist accurately
       let promoted = null;
       if (isMain) {
-        const wl = rows.find((r, i) => i !== ri && r[1]?.trim() === fd && r[4]?.trim() && r[5] === 'Waitlist');
-        if (wl) {
-          const wi = rows.indexOf(wl);
+        const sr2 = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
+        const rows2 = sr2.data.values || [];
+        for (let i = 0; i < rows2.length; i++) {
+          const r = rows2[i];
+          if ((r[1]||'').trim() !== fd) continue;
+          if (!(r[4]||'').trim() || (r[4]||'').trim() === '—') continue;
+          if ((r[5]||'').trim() !== 'Waitlist') continue;
+          // Found first waitlist player — promote them
+          const wlSheetRow = i + 1;
           await s.spreadsheets.values.update({
-            spreadsheetId: SHEET, range: `Sessions!F${wi + 1}:I${wi + 1}`,
-            valueInputOption: 'RAW', requestBody: { values: [['Games Only', 'Pending', 'Yes', 'No']] },
+            spreadsheetId: SHEET,
+            range: `Sessions!F${wlSheetRow}`,
+            valueInputOption: 'RAW',
+            requestBody: { values: [['Games Only']] },
           });
-          promoted = wl[4];
+          await s.spreadsheets.values.update({
+            spreadsheetId: SHEET,
+            range: `Sessions!H${wlSheetRow}`,
+            valueInputOption: 'RAW',
+            requestBody: { values: [['Pending']] },
+          });
+          promoted = (r[4]||'').trim();
+          break;
         }
       }
 
@@ -296,7 +324,7 @@ export async function POST(req) {
         await s.spreadsheets.values.append({
           spreadsheetId: SHEET, range: 'Cancellations!A:G',
           valueInputOption: 'USER_ENTERED',
-          requestBody: { values: [[ts, name, fd, title || '', ctype, promoted || '', late ? 'Yes' : 'No']] },
+          requestBody: { values: [[ts, name, fd, title||'', ctype, promoted||'', late?'Yes':'No']] },
         });
       } catch {}
 
@@ -383,42 +411,74 @@ export async function POST(req) {
       const fd = toSheetDate(date);
       const ts = nowTs();
 
+      // Read sheet
       const sr = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
       const rows = sr.data.values || [];
-      const ri = rows.findIndex(r => r[1]?.trim() === fd && r[4]?.trim() === name);
 
-      if (ri >= 0) {
-        const oldType = (rows[ri][5] || '').trim();
-        // Move player to waitlist
-        await s.spreadsheets.values.update({
-          spreadsheetId: SHEET, range: `Sessions!D${ri+1}:H${ri+1}`,
-          valueInputOption: 'RAW',
-          requestBody: { values: [['No', name, 'Waitlist', rows[ri][6], 'Pending']] },
-        });
-
-        // Promote first waitlist player if this was a main list player
-        if (oldType === 'Games Only' || oldType === 'Training + Games') {
-          const wl = rows.find((r, i) => i !== ri && r[1]?.trim() === fd && r[4]?.trim() && r[5] === 'Waitlist');
-          if (wl) {
-            const wi = rows.indexOf(wl);
-            await s.spreadsheets.values.update({
-              spreadsheetId: SHEET, range: `Sessions!F${wi+1}:H${wi+1}`,
-              valueInputOption: 'RAW',
-              requestBody: { values: [['Games Only', wl[6], 'Pending']] },
-            });
-          }
+      // Find player
+      let playerSheetRow = -1;
+      let oldType = '';
+      for (let i = 0; i < rows.length; i++) {
+        if ((rows[i][1]||'').trim() === fd && (rows[i][4]||'').trim() === name) {
+          playerSheetRow = i + 1;
+          oldType = (rows[i][5]||'').trim();
+          break;
         }
-
-        // Log to cancellations
-        try {
-          await s.spreadsheets.values.append({
-            spreadsheetId: SHEET, range: 'Cancellations!A:G',
-            valueInputOption: 'USER_ENTERED',
-            requestBody: { values: [[ts, name, fd, title||'', oldType, '', 'Yes']] },
-          });
-        } catch {}
       }
-      return NextResponse.json({ success: true });
+      if (playerSheetRow < 0) return NextResponse.json({ success: true });
+
+      const isMain = oldType === 'Games Only' || oldType === 'Training + Games';
+
+      // Move player to Waitlist — update Paid, Type, Status only (leave name etc intact)
+      await s.spreadsheets.values.update({
+        spreadsheetId: SHEET, range: `Sessions!D${playerSheetRow}`,
+        valueInputOption: 'RAW', requestBody: { values: [['No']] },
+      });
+      await s.spreadsheets.values.update({
+        spreadsheetId: SHEET, range: `Sessions!F${playerSheetRow}`,
+        valueInputOption: 'RAW', requestBody: { values: [['Waitlist']] },
+      });
+      await s.spreadsheets.values.update({
+        spreadsheetId: SHEET, range: `Sessions!H${playerSheetRow}`,
+        valueInputOption: 'RAW', requestBody: { values: [['Pending']] },
+      });
+
+      // Re-read sheet then promote first OTHER waitlist player
+      let promoted = null;
+      if (isMain) {
+        const sr2 = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
+        const rows2 = sr2.data.values || [];
+        for (let i = 0; i < rows2.length; i++) {
+          const r = rows2[i];
+          if ((r[1]||'').trim() !== fd) continue;
+          if (!(r[4]||'').trim() || (r[4]||'').trim() === '—') continue;
+          if ((r[5]||'').trim() !== 'Waitlist') continue;
+          if ((r[4]||'').trim() === name) continue; // skip the bumped player
+          // Promote this player
+          const wlSheetRow = i + 1;
+          await s.spreadsheets.values.update({
+            spreadsheetId: SHEET, range: `Sessions!F${wlSheetRow}`,
+            valueInputOption: 'RAW', requestBody: { values: [['Games Only']] },
+          });
+          await s.spreadsheets.values.update({
+            spreadsheetId: SHEET, range: `Sessions!H${wlSheetRow}`,
+            valueInputOption: 'RAW', requestBody: { values: [['Pending']] },
+          });
+          promoted = (r[4]||'').trim();
+          break;
+        }
+      }
+
+      // Log
+      try {
+        await s.spreadsheets.values.append({
+          spreadsheetId: SHEET, range: 'Cancellations!A:G',
+          valueInputOption: 'USER_ENTERED',
+          requestBody: { values: [[ts, name, fd, title||'', oldType, promoted||'', 'Yes']] },
+        });
+      } catch {}
+
+      return NextResponse.json({ success: true, promoted });
     }
 
     // ── save teams ───────────────────────────────────────────
