@@ -553,6 +553,23 @@ export async function POST(req) {
       return NextResponse.json({ success: true, archived: toArchive.length, archiveName });
     }
 
+    // ── debug: see raw sheet rows for a date ────────────────
+    if (body.action === 'debug_date') {
+      const { date } = body;
+      const fd = toSheetDate(date);
+      const sr = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Sessions!A:K' });
+      const rows = sr.data.values || [];
+      const matching = rows.map((r, i) => ({
+        sheetRow: i + 1,
+        date: r[1]||'',
+        paid: r[3]||'',
+        name: r[4]||'',
+        type: r[5]||'',
+        status: r[7]||'',
+      })).filter(r => r.date.trim() === fd || r.date.includes('Sep'));
+      return NextResponse.json({ fd, matching });
+    }
+
     return NextResponse.json({ error: 'unknown action' }, { status: 400 });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
