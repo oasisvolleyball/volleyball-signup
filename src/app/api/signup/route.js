@@ -535,16 +535,35 @@ export async function POST(req) {
     if (body.action === 'save_teams') {
       const { date, teams } = body;
       const fd = toSheetDate(date);
-      const rows = [];
+
+      // Read existing Teams sheet
+      const tr = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Teams!A:F' });
+      const trows = tr.data.values || [];
+
+      // Keep rows that are NOT for this date (preserve other sessions' teams)
+      const toKeep = trows.filter((r, i) => {
+        if (i < 3) return true; // keep header rows
+        const rDate = (r[1]||'').trim().replace('Sept','Sep');
+        return rDate !== fd;
+      });
+
+      // Build new rows for this date
+      const newRows = [];
       let n = 1;
       for (const t of teams) {
         for (const p of t.players) {
-          rows.push([n++, fd, p.name, t.color, p.setter ? 'Setter' : 'Player', p.rating || '']);
+          newRows.push([n++, fd, p.name, t.color, p.setter ? 'Setter' : 'Player', p.rating||'']);
         }
       }
-      await s.spreadsheets.values.append({
-        spreadsheetId: SHEET, range: 'Teams!A:F',
-        valueInputOption: 'USER_ENTERED', requestBody: { values: rows },
+
+      // Write back: kept rows + new rows, pad to clear leftovers
+      const allRows = [...toKeep, ...newRows];
+      const maxRow = Math.max(allRows.length, trows.length) + 5;
+      while (allRows.length < maxRow) allRows.push(['','','','','','']);
+
+      await s.spreadsheets.values.update({
+        spreadsheetId: SHEET, range: 'Teams!A1',
+        valueInputOption: 'USER_ENTERED', requestBody: { values: allRows },
       });
       return NextResponse.json({ success: true });
     }
@@ -603,6 +622,33 @@ export async function POST(req) {
         status: r[7]||'',
       })).filter(r => r.date.trim() === fd || r.date.includes('Sep'));
       return NextResponse.json({ fd, matching });
+    }
+
+    // ── load teams for a date ────────────────────────────────
+    if (body.action === 'load_teams') {
+      const { date } = body;
+      const fd = toSheetDate(date);
+      const tr = await s.spreadsheets.values.get({ spreadsheetId: SHEET, range: 'Teams!A:F' });
+      const trows = tr.data.values || [];
+      // Collect rows for this date
+      const teamMap = {};
+      for (let i = 3; i < trows.length; i++) {
+        const r = trows[i];
+        const rDate = (r[1]||'').trim().replace('Sept','Sep');
+        const rName = (r[2]||'').trim();
+        const rColor = (r[3]||'').trim();
+        const rRole = (r[4]||'').trim();
+        const rRating = (r[5]||'').trim();
+        if (rDate !== fd || !rName || !rColor) continue;
+        if (!teamMap[rColor]) teamMap[rColor] = [];
+        teamMap[rColor].push({
+          name: rName,
+          setter: rRole === 'Setter',
+          rating: rRating,
+        });
+      }
+      const teams = Object.entries(teamMap).map(([color, players]) => ({ color, players }));
+      return NextResponse.json({ success: true, teams });
     }
 
     // version check
