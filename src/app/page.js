@@ -550,9 +550,21 @@ export default function App() {
     setTmFriends(d.friendRequests||[]);
     // Include paid, cash, and hosts — exclude waitlist and training only
     const eligible=(d.signups||[]).filter(p=>p.type!=='Waitlist'&&p.type!=='Training Only'&&(p.paid==='Yes'||p.paid==='Cash'||p.host==='Yes'));
+    // Fetch fresh player data to ensure ratings/setter are current
+    let freshPlayers = players;
+    if (!freshPlayers.length) {
+      const pr = await fetch('/api/signup').then(r=>r.json()).catch(()=>({}));
+      freshPlayers = pr.players || [];
+    }
     const enriched=eligible.map(p=>{
-      const pl=players.find(pp=>pp.name.toLowerCase()===p.name.toLowerCase());
-      return{...p,rating:pl?.rating||p.rating||'',setter:pl?.setter==='Setter',attack:pl?.attack||'',receive:pl?.receive||'',gender:pl?.gender||''};
+      const pl=freshPlayers.find(pp=>pp.name.toLowerCase()===p.name.toLowerCase());
+      return{...p,
+        rating: pl?.rating||p.rating||'',
+        setter: pl?.setter==='Setter' || p.setter==='Setter',
+        attack: pl?.attack||'',
+        receive: pl?.receive||'',
+        gender: pl?.gender||''
+      };
     });
     setTmPool(enriched); setTmTeams([]); setTmSaved(false);
   },[players]);
