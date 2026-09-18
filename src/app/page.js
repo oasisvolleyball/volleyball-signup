@@ -333,6 +333,7 @@ export default function App() {
   const [tmDrag, setTmDrag]   = useState(null);
   const [tmOver, setTmOver]   = useState(null);
   const [tmSaved, setTmSaved] = useState(false);
+  const [tmForcePool, setTmForcePool] = useState(false); // when true, skip saved teams and show live pool
   const [tmFriends, setTmFriends] = useState([]);
 
   // History
@@ -598,7 +599,7 @@ export default function App() {
       }));
       setTmTeams(enrichedTeams);
       setTmPool([]);
-      setTmSaved(true);
+      setTmSaved(true); setTmForcePool(false);
       return;
     }
 
@@ -617,7 +618,7 @@ export default function App() {
     setTmPool(enriched); setTmTeams([]); setTmSaved(false);
   },[players]);
 
-  useEffect(()=>{if(tmSess) loadTm(tmSess);},[tmSess,loadTm]);
+  useEffect(()=>{if(tmSess){if(tmForcePool) loadFreshPool(tmSess); else loadTm(tmSess);}},[tmSess,loadTm,loadFreshPool,tmForcePool]);
 
   const autoBalance=()=>{
     const n=tmCount;
@@ -670,7 +671,7 @@ export default function App() {
   const saveTm=async()=>{
     await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({action:'save_teams',date:tmSess.date,teams:tmTeams,title:tmSess.title})});
-    setTmSaved(true);
+    setTmSaved(true); setTmForcePool(false);
   };
 
   // ── History ──────────────────────────────────────────────────
@@ -1335,7 +1336,7 @@ export default function App() {
                     <div className="sec sec-line" style={{marginTop:4}}>Select Session</div>
                     {sessions.length===0&&<div className="alert-info">No open sessions.</div>}
                     {sessions.map(s=>(
-                      <div key={s.id} className="card" style={{cursor:'pointer'}} onClick={()=>setTmSess(s)}>
+                      <div key={s.id} className="card" style={{cursor:'pointer'}} onClick={()=>{setTmForcePool(false);setTmSess(s);}}>
                         <div style={{fontSize:15,fontWeight:800,color:'#0f172a',marginBottom:3}}>{s.title}</div>
                         <div style={{fontSize:13,color:'#64748b'}}>{fmtLong(s.date)} · {s.location}</div>
                       </div>
@@ -1346,9 +1347,9 @@ export default function App() {
                     <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
                       <div>
                         <div style={{fontSize:15,fontWeight:800,color:'#0f172a'}}>{tmSess.title}</div>
-                        <button className="back-btn" onClick={()=>setTmSess(null)}>← Change session</button>
+                        <button className="back-btn" onClick={()=>{setTmForcePool(false);setTmSess(null);}}>← Change session</button>
                       </div>
-                      <button className="btn-outline" onClick={()=>loadTm(tmSess)}>↻ Refresh</button>
+                      <button className="btn-outline" onClick={()=>{setTmForcePool(false);loadTm(tmSess);}}>↻ Refresh</button>
                     </div>
 
                     {tmFriends.length>0&&(
@@ -1416,7 +1417,7 @@ export default function App() {
                     {tmTeams.length>0&&(
                       <div style={{display:'flex',flexDirection:'column',gap:8,marginTop:10}}>
                         {tmSaved&&(
-                          <button className="btn-outline" onClick={()=>loadFreshPool(tmSess)}>
+                          <button className="btn-outline" onClick={()=>{setTmForcePool(true);loadFreshPool(tmSess);}}>
                             ↺ Re-balance / Edit Teams
                           </button>
                         )}
