@@ -495,9 +495,16 @@ export default function App() {
   const gnRate=async(name,field,val)=>{
     const key=`${name}_${field}`;
     setGnBusy(p=>({...p,[key]:true}));
-    setPlayers(prev=>prev.map(p=>p.name===name?{...p,[field]:val}:p));
-    await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},
+    // Case-insensitive match so visual update sticks regardless of name casing
+    const nl=name.toLowerCase();
+    setPlayers(prev=>prev.map(p=>p.name.toLowerCase()===nl?{...p,[field]:val}:p));
+    const res=await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({action:'rate_player',name,field,value:val})});
+    const d=await res.json().catch(()=>({}));
+    if(d.notFound){
+      // Player name in session doesn't match Players sheet — try to reload
+      console.warn('rate_player notFound for:',name,'matched:',d.matched);
+    }
     setGnBusy(p=>{const n={...p};delete n[key];return n;});
   };
 
@@ -543,10 +550,33 @@ export default function App() {
   };
 
   // ── Teams ────────────────────────────────────────────────────
+  // Load fresh eligible pool from live signups (ignores any saved teams)
+  const loadFreshPool=useCallback(async(s)=>{
+    if(!s) return;
+    const [sessionRes, playerRes] = await Promise.all([
+      fetch(`/api/session?date=${encodeURIComponent(s.date)}`).then(r=>r.json()).catch(()=>({})),
+      fetch('/api/signup').then(r=>r.json()).catch(()=>({})),
+    ]);
+    const freshPlayers = playerRes.players || players;
+    setTmFriends(sessionRes.friendRequests||[]);
+    const eligible=(sessionRes.signups||[]).filter(p=>p.type!=='Waitlist'&&p.type!=='Training Only'&&(p.paid==='Yes'||p.paid==='Cash'||p.host==='Yes'));
+    const enriched=eligible.map(p=>{
+      const pl=freshPlayers.find(pp=>pp.name.toLowerCase()===p.name.toLowerCase());
+      return{...p,
+        rating: pl?.rating||p.rating||'',
+        setter: pl?.setter==='Setter' || p.setter==='Setter',
+        attack: pl?.attack||'',
+        receive: pl?.receive||'',
+        gender: pl?.gender||''
+      };
+    });
+    setTmPool(enriched); setTmTeams([]); setTmSaved(false);
+  },[players]);
+
+  // Load teams tab — shows saved teams if they exist, otherwise loads fresh pool
   const loadTm=useCallback(async(s)=>{
     if(!s) return;
 
-    // Fetch fresh player data and session signups in parallel
     const [sessionRes, playerRes, savedTeamsRes] = await Promise.all([
       fetch(`/api/session?date=${encodeURIComponent(s.date)}`).then(r=>r.json()).catch(()=>({})),
       fetch('/api/signup').then(r=>r.json()).catch(()=>({})),
@@ -557,7 +587,7 @@ export default function App() {
     const freshPlayers = playerRes.players || players;
     setTmFriends(sessionRes.friendRequests||[]);
 
-    // If saved teams exist for this date, load them
+    // If saved teams exist for this date, show them
     if (savedTeamsRes.teams && savedTeamsRes.teams.length > 0) {
       const enrichedTeams = savedTeamsRes.teams.map(t => ({
         ...t,
@@ -1386,7 +1416,7 @@ export default function App() {
                     {tmTeams.length>0&&(
                       <div style={{display:'flex',flexDirection:'column',gap:8,marginTop:10}}>
                         {tmSaved&&(
-                          <button className="btn-outline" onClick={()=>{setTmSaved(false);loadTm(tmSess);}}>
+                          <button className="btn-outline" onClick={()=>loadFreshPool(tmSess)}>
                             ↺ Re-balance / Edit Teams
                           </button>
                         )}
